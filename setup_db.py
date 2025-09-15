@@ -9,32 +9,60 @@ DB_CONFIG = {
     'host': os.getenv('DB_HOST', 'localhost'),
     'user': os.getenv('DB_USER', 'postgres'),
     'password': os.getenv('DB_PASSWORD', 'postgres'),
-    'port': int(os.getenv('DB_PORT', 5432)),
-    'database': 'BancodadosOF'  # Nome do seu banco existente
+    'port': int(os.getenv('DB_PORT', 5432))
 }
 
-def get_connection():
-    """Cria e retorna uma conexão com o banco de dados."""
-    try:
-        conn = psycopg2.connect(**DB_CONFIG)
-        return conn
-    except Exception as e:
-        print(f"❌ Erro ao conectar: {e}")
-        return None
+DB_NAME = os.getenv('DB_NAME', 'presenca_alunos')
 
-# Exemplo: Consultar todos os alunos
-def listar_alunos():
-    conn = get_connection()
-    if conn:
+def setup_database():
+    try:
+        # Conecta ao PostgreSQL
+        conn = psycopg2.connect(**DB_CONFIG)
+        conn.autocommit = True
         cur = conn.cursor()
-        cur.execute("SELECT id, nome, arm, presenca, horario, responsavel FROM alunos;")
-        alunos = cur.fetchall()
+        
+        
         cur.close()
         conn.close()
-        return alunos
-    return []
+        
+        # Conecta ao banco específico e cria as tabelas
+        db_config_with_db = DB_CONFIG.copy()
+        db_config_with_db['database'] = DB_NAME
+        
+        conn = psycopg2.connect(**db_config_with_db)
+        cur = conn.cursor()
+        
+        # Cria as tabelas
+        cur.execute("""
+            CREATE TABLE alunos (
+                id SERIAL PRIMARY KEY,
+                nome VARCHAR(100) NOT NULL,
+                face_token VARCHAR(255) UNIQUE NOT NULL,
+                data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            
+            CREATE TABLE presencas (
+                id SERIAL PRIMARY KEY,
+                aluno_id INTEGER REFERENCES alunos(id),
+                data_presenca DATE DEFAULT CURRENT_DATE,
+                horario_presenca TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                presente BOOLEAN DEFAULT TRUE,
+                confianca DECIMAL(5,2),
+                UNIQUE(aluno_id, data_presenca)
+            );
+        """)
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        print("✅ Tabelas criadas!")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Erro: {e}")
+        return False
 
 if __name__ == "__main__":
-    alunos = listar_alunos()
-    for aluno in alunos:
-        print(aluno)
+    print("🔧 Configurando PostgreSQL...")
+    setup_database()

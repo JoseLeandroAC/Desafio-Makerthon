@@ -65,7 +65,8 @@ def init_database():
                     id SERIAL PRIMARY KEY,
                     nome VARCHAR(100) NOT NULL,
                     face_token VARCHAR(255) UNIQUE NOT NULL,
-                    data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    responsável VARCHAR(255) UNIQUE NOT NULL
                 );
                 
                 CREATE TABLE IF NOT EXISTS presencas (
