@@ -55,20 +55,30 @@ def get_db_connection():
         return None
 
 def init_database():
-    """Cria as tabelas necessárias se não existirem"""
+    """Cria/ajusta as tabelas necessárias"""
     conn = get_db_connection()
     if conn:
         try:
             cur = conn.cursor()
+
+            # Criação base SEM coluna com acento e COM email_responsavel
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS alunos (
                     id SERIAL PRIMARY KEY,
                     nome VARCHAR(100) NOT NULL,
                     face_token VARCHAR(255) UNIQUE NOT NULL,
                     data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    responsável VARCHAR(255) UNIQUE NOT NULL
+                    email_responsavel TEXT
                 );
-                
+            """)
+
+            # Garante a coluna email_responsavel mesmo se a tabela já existia
+            cur.execute("""
+                ALTER TABLE alunos
+                ADD COLUMN IF NOT EXISTS email_responsavel TEXT;
+            """)
+
+            cur.execute("""
                 CREATE TABLE IF NOT EXISTS presencas (
                     id SERIAL PRIMARY KEY,
                     aluno_id INTEGER REFERENCES alunos(id),
@@ -79,11 +89,12 @@ def init_database():
                     UNIQUE(aluno_id, data_presenca)
                 );
             """)
+
             conn.commit()
             cur.close()
             conn.close()
         except Exception as e:
-            print(f"Erro ao criar tabelas: {e}")
+            print(f"Erro ao criar/ajustar tabelas: {e}")
 
 def registrar_presenca(nome_aluno, confianca):
     """Registra presença no banco - se já houver, apaga; caso contrário, insere"""
@@ -91,16 +102,16 @@ def registrar_presenca(nome_aluno, confianca):
     if conn:
         try:
             cur = conn.cursor()
-            
+
             # Verifica se já existe presença hoje
             cur.execute("""
                 SELECT p.id FROM presencas p
                 JOIN alunos a ON p.aluno_id = a.id
                 WHERE a.nome = %s AND p.data_presenca = CURRENT_DATE
             """, (nome_aluno,))
-            
+
             resultado = cur.fetchone()
-            
+
             if resultado:
                 # Se já existe, apaga a presença
                 presenca_id = resultado[0]
@@ -108,8 +119,8 @@ def registrar_presenca(nome_aluno, confianca):
                 conn.commit()
                 cur.close()
                 conn.close()
-                return "apagada"  # Código especial indicando que a presença foi removida
-            
+                return "apagada"
+
             # Se não existe, insere nova presença
             cur.execute("""
                 INSERT INTO presencas (aluno_id, presente, confianca) 
@@ -160,7 +171,7 @@ def admin_panel():
                 ORDER BY a.nome
             """)
             dados = cur.fetchall()
-            
+
             # Buscar estatísticas gerais
             cur.execute("""
                 SELECT 
@@ -171,10 +182,10 @@ def admin_panel():
                     AND p.data_presenca = CURRENT_DATE
             """)
             stats = cur.fetchone()
-            
+
             cur.close()
             conn.close()
-            
+
             # Formatar dados para o template
             dados_formatados = []
             for row in dados:
@@ -184,15 +195,15 @@ def admin_panel():
                     'horario': row[2].strftime('%H:%M:%S') if row[2] else None,
                     'confianca': float(row[3]) if row[3] else None
                 })
-            
+
             # Data atual formatada
             data_hoje = datetime.now().strftime('%d/%m/%Y')
-            
+
             return render_template("admin.html", 
-                                 dados=dados_formatados, 
-                                 total_alunos=stats[0], 
-                                 presentes_hoje=stats[1],
-                                 data_hoje=data_hoje)
+                                   dados=dados_formatados, 
+                                   total_alunos=stats[0], 
+                                   presentes_hoje=stats[1],
+                                   data_hoje=data_hoje)
         except Exception as e:
             return f"Erro: {e}"
     return "Erro de conexão com banco"
@@ -241,7 +252,7 @@ def cadastrar_alunos():
                     if existente:
                         log_messages.append(f"⚠️ {nome} já está cadastrado.")
                     else:
-                        # Inserir novo aluno
+                        # Inserir novo aluno (email_responsavel ficará NULL até você preencher)
                         cur.execute("""
                             INSERT INTO alunos (nome, face_token) 
                             VALUES (%s, %s)
