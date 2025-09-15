@@ -10,6 +10,7 @@ from io import BytesIO
 from dotenv import load_dotenv
 
 
+
 # Carregar variáveis de ambiente
 load_dotenv()
 
@@ -218,12 +219,21 @@ def cadastrar_alunos():
     carregar_tokens()
     pasta = os.path.join(os.path.dirname(__file__), "alunos")
 
+    # Carrega o mapa de e-mails { "NomeDoAluno": "email@exemplo.com" }
+    try:
+        with open(ARQUIVO_EMAILS, "r", encoding="utf-8") as f:
+            emails_map = json.load(f)
+    except (FileNotFoundError, json.JSONDecodeError):
+        emails_map = {}
+
     if not os.path.exists(pasta):
-        return jsonify({"status": "error", "message": "❌ Pasta 'alunos' não encontrada."}), 404
+        return jsonify({"status": "error",
+                        "message": "❌ Pasta 'alunos' não encontrada."}), 404
 
     arquivos = os.listdir(pasta)
     if not arquivos:
-        return jsonify({"status": "warning", "message": "⚠️ Nenhuma foto encontrada na pasta 'alunos'."}), 200
+        return jsonify({"status": "warning",
+                        "message": "⚠️ Nenhuma foto encontrada na pasta 'alunos'."}), 200
 
     log_messages = []
 
@@ -231,7 +241,7 @@ def cadastrar_alunos():
         nome = os.path.splitext(foto)[0]
         caminho = os.path.join(pasta, foto)
 
-        # Detectar rosto usando Face++
+        # Detecta rosto
         with open(caminho, "rb") as f:
             detect_url = "https://api-us.faceplusplus.com/facepp/v3/detect"
             detect_response = request_json_safe(
@@ -245,27 +255,34 @@ def cadastrar_alunos():
             face_token = detect_response["faces"][0]["face_token"]
             alunos_tokens[face_token] = nome
 
-            # Salvar no PostgreSQL, evitando duplicados
             conn = get_db_connection()
             if conn:
                 try:
                     cur = conn.cursor()
-                    # Verifica se já existe aluno com o mesmo nome ou face_token
-                    cur.execute("SELECT id FROM alunos WHERE nome = %s OR face_token = %s", (nome, face_token))
+                    # Já existe?
+                    cur.execute(
+                        "SELECT id FROM alunos WHERE nome = %s OR face_token = %s",
+                        (nome, face_token)
+                    )
                     existente = cur.fetchone()
 
                     if existente:
                         log_messages.append(f"⚠️ {nome} já está cadastrado.")
                     else:
-                        # Inserir novo aluno (email_responsavel ficará NULL até você preencher)
-                        cur.execute("""
-                            INSERT INTO alunos (nome, face_token) 
-                            VALUES (%s, %s)
-                        """, (nome, face_token))
-                        conn.commit()
-                        log_messages.append(f"✅ {nome} cadastrado com sucesso.")
+                        # Busca e-mail correspondente (ou None se não achar)
+                        email_resp = emails_map.get(nome)
 
-                        # Adicionar ao Face++ Faceset
+                        cur.execute("""
+                            INSERT INTO alunos (nome, face_token, email_responsavel)
+                            VALUES (%s, %s, %s)
+                        """, (nome, face_token, email_resp))
+                        conn.commit()
+                        log_messages.append(
+                            f"✅ {nome} cadastrado com sucesso."
+                            + ("" if email_resp else " (sem e-mail informado)")
+                        )
+
+                        # Adiciona ao FaceSet
                         addface_url = "https://api-us.faceplusplus.com/facepp/v3/faceset/addface"
                         request_json_safe(
                             "POST",
@@ -287,8 +304,11 @@ def cadastrar_alunos():
             log_messages.append(f"❌ {nome}: {erro}")
 
     salvar_tokens()
-    return jsonify({"status": "success", "message": "Cadastro concluído.", "log": log_messages}), 200
-
+    return jsonify({
+        "status": "success",
+        "message": "Cadastro concluído.",
+        "log": log_messages
+    }), 200
 
 @app.route('/chamada_webcam', methods=['POST'])
 def chamada_webcam():
