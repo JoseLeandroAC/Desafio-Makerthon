@@ -5,8 +5,8 @@ import smtplib
 from email.message import EmailMessage
 
 # Configurações do Gmail (vai usar .env depois)
-GMAIL_USER = os.getenv("GMAIL_USER", "seuemail@gmail.com")
-GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD", "senha_app")
+GMAIL_USER = os.getenv("GMAIL_USER", "votumaker@gmail.com")
+GMAIL_APP_PASSWORD = os.getenv("gsabgjmrzdbkxusg", "senha_app")
 
 # ===========================
 # Funções para processar ausentes
@@ -20,7 +20,7 @@ def get_absent_students():
     """
     # EXEMPLO DE TESTE:
     return [
-        ("João Silva", "pai_joao@gmail.com"),
+        ("Jose Leandro", "dede61727@gmail.com"),
         ("Maria Oliveira", "mae_maria@gmail.com")
     ]
 
@@ -29,9 +29,9 @@ def get_absent_students():
 # ===========================
 
 def load_template():
-    """Carrega template do arquivo email_template.txt"""
+    """Carrega template do arquivo template_gmail.txt"""
     try:
-        with open("email_template.txt", "r", encoding="utf-8") as f:
+        with open("template_gmail.txt", "r", encoding="utf-8") as f:
             return Template(f.read())
     except FileNotFoundError:
         # Template de fallback se não existir arquivo

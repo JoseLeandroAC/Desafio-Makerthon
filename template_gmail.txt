@@ -1,0 +1,8 @@
+Olá,
+
+Informamos que ${aluno_nome} esteve ausente na escola no dia ${data}.
+
+Pedimos atenção e acompanhamento para que ele(a) não perca o conteúdo.
+
+Atenciosamente,
+Equipe Escolar
