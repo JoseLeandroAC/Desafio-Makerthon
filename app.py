@@ -9,8 +9,6 @@ from flask_cors import CORS
 from io import BytesIO
 from dotenv import load_dotenv
 
-
-
 # Carregar variáveis de ambiente
 load_dotenv()
 
@@ -29,9 +27,8 @@ DB_CONFIG = {
     'port': int(os.getenv('DB_PORT', 5432))
 }
 
-# Definindo emails
+# Arquivo JSON com e-mails dos responsáveis
 ARQUIVO_EMAILS = "alunos_emails.json"
-
 
 app = Flask(__name__)
 CORS(app)
@@ -67,7 +64,7 @@ def init_database():
         try:
             cur = conn.cursor()
 
-            # Criação base SEM coluna com acento e COM email_responsavel
+            # Criação da tabela alunos
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS alunos (
                     id SERIAL PRIMARY KEY,
@@ -84,6 +81,7 @@ def init_database():
                 ADD COLUMN IF NOT EXISTS email_responsavel TEXT;
             """)
 
+            # Criação da tabela presencas
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS presencas (
                     id SERIAL PRIMARY KEY,
@@ -202,7 +200,6 @@ def admin_panel():
                     'confianca': float(row[3]) if row[3] else None
                 })
 
-            # Data atual formatada
             data_hoje = datetime.now().strftime('%d/%m/%Y')
 
             return render_template("admin.html", 
@@ -219,21 +216,19 @@ def cadastrar_alunos():
     carregar_tokens()
     pasta = os.path.join(os.path.dirname(__file__), "alunos")
 
-    # Carrega o mapa de e-mails { "NomeDoAluno": "email@exemplo.com" }
-    try:
-        with open(ARQUIVO_EMAILS, "r", encoding="utf-8") as f:
-            emails_map = json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        emails_map = {}
+    # Carrega o arquivo JSON com emails
+    if not os.path.exists(ARQUIVO_EMAILS):
+        return jsonify({"status": "error", "message": f"❌ Arquivo {ARQUIVO_EMAILS} não encontrado."}), 404
+
+    with open(ARQUIVO_EMAILS, "r", encoding="utf-8") as f:
+        emails_map = json.load(f)
 
     if not os.path.exists(pasta):
-        return jsonify({"status": "error",
-                        "message": "❌ Pasta 'alunos' não encontrada."}), 404
+        return jsonify({"status": "error", "message": "❌ Pasta 'alunos' não encontrada."}), 404
 
     arquivos = os.listdir(pasta)
     if not arquivos:
-        return jsonify({"status": "warning",
-                        "message": "⚠️ Nenhuma foto encontrada na pasta 'alunos'."}), 200
+        return jsonify({"status": "warning", "message": "⚠️ Nenhuma foto encontrada na pasta 'alunos'."}), 200
 
     log_messages = []
 
@@ -241,13 +236,13 @@ def cadastrar_alunos():
         nome = os.path.splitext(foto)[0]
         caminho = os.path.join(pasta, foto)
 
-        # Detecta rosto
-        with open(caminho, "rb") as f:
+        # Detectar rosto usando Face++
+        with open(caminho, "rb") as f_img:
             detect_url = "https://api-us.faceplusplus.com/facepp/v3/detect"
             detect_response = request_json_safe(
                 "POST",
                 detect_url,
-                files={"image_file": f},
+                files={"image_file": f_img},
                 data={"api_key": API_KEY, "api_secret": API_SECRET}
             )
 
@@ -255,34 +250,33 @@ def cadastrar_alunos():
             face_token = detect_response["faces"][0]["face_token"]
             alunos_tokens[face_token] = nome
 
+            # Pega o e-mail do responsável a partir do JSON
+            email_resp = emails_map.get(nome)
+            if not email_resp:
+                log_messages.append(f"⚠️ {nome} sem e-mail no arquivo JSON. Pulando cadastro.")
+                continue
+
+            # Salvar no PostgreSQL, evitando duplicados
             conn = get_db_connection()
             if conn:
                 try:
                     cur = conn.cursor()
-                    # Já existe?
-                    cur.execute(
-                        "SELECT id FROM alunos WHERE nome = %s OR face_token = %s",
-                        (nome, face_token)
-                    )
+                    # Verifica se já existe aluno com o mesmo nome ou face_token
+                    cur.execute("SELECT id FROM alunos WHERE nome = %s OR face_token = %s", (nome, face_token))
                     existente = cur.fetchone()
 
                     if existente:
                         log_messages.append(f"⚠️ {nome} já está cadastrado.")
                     else:
-                        # Busca e-mail correspondente (ou None se não achar)
-                        email_resp = emails_map.get(nome)
-
+                        # Inserir novo aluno com email do responsável
                         cur.execute("""
-                            INSERT INTO alunos (nome, face_token, email_responsavel)
+                            INSERT INTO alunos (nome, face_token, email_responsavel) 
                             VALUES (%s, %s, %s)
                         """, (nome, face_token, email_resp))
                         conn.commit()
-                        log_messages.append(
-                            f"✅ {nome} cadastrado com sucesso."
-                            + ("" if email_resp else " (sem e-mail informado)")
-                        )
+                        log_messages.append(f"✅ {nome} cadastrado com sucesso. E-mail do responsável: {email_resp}")
 
-                        # Adiciona ao FaceSet
+                        # Adicionar ao Face++ Faceset
                         addface_url = "https://api-us.faceplusplus.com/facepp/v3/faceset/addface"
                         request_json_safe(
                             "POST",
@@ -304,11 +298,7 @@ def cadastrar_alunos():
             log_messages.append(f"❌ {nome}: {erro}")
 
     salvar_tokens()
-    return jsonify({
-        "status": "success",
-        "message": "Cadastro concluído.",
-        "log": log_messages
-    }), 200
+    return jsonify({"status": "success", "message": "Cadastro concluído.", "log": log_messages}), 200
 
 @app.route('/chamada_webcam', methods=['POST'])
 def chamada_webcam():
@@ -350,7 +340,6 @@ def chamada_webcam():
     else:
         erro = response.get("error", "Nenhum rosto detectado")
         return jsonify({"status": "nao_detectado", "message": erro})
-
 
 @app.route('/presencas')
 def ver_presencas():
