@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <link rel="manifest" href="/manifest.json">
+    <meta name="theme-color" content="#0078d7">
+    <title>Interface de Escaneamento Facial</title>
+    <style>
+        /* Estilos CSS para o corpo da página */
+        body {
+            font-family: Arial, sans-serif; /* Fonte padrão */
+            display: flex; /* Usa flexbox para alinhamento */
+            flex-direction: column; /* Organiza os itens verticalmente */
+            align-items: center; /* Centraliza os itens horizontalmente */
+            padding: 20px;
+            background-color: #071629; /* Cor de fundo escura, nova cor */
+            color: #ecf0f1; /* Cor do texto para contraste */
+            position: relative; /* Essencial para posicionar a logo */
+            min-height: 100vh; /* Garante que o corpo ocupe a altura total da tela */
+        }
+        /* Estilos para o contêiner do vídeo */
+        #video-container {
+            position: relative;
+            width: 640px;
+            height: 480px;
+            border: 2px solid #3498db; /* Borda azul para o contêiner */
+            border-radius: 8px; /* Cantos arredondados */
+            overflow: hidden; /* Oculta qualquer conteúdo que transborde */
+            background-color: #000;
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3); /* Sombra para dar profundidade */
+        }
+        /* Estilos para o elemento de vídeo */
+        #video-stream {
+            width: 100%;
+            height: 100%;
+            object-fit: cover; /* Garante que o vídeo preencha todo o contêiner */
+        }
+        /* Estilos para o contêiner dos botões */
+        #controls {
+            margin-top: 20px;
+            display: flex;
+            gap: 15px; /* Espaçamento entre os botões */
+        }
+        /* Estilos para os botões */
+        button {
+            padding: 12px 25px; /* Preenchimento interno */
+            font-size: 17px; /* Tamanho da fonte */
+            cursor: pointer; /* Muda o cursor para indicar que é clicável */
+            border: none; /* Remove a borda padrão */
+            border-radius: 5px; /* Cantos arredondados */
+            background-color: #3498db; /* Cor de fundo azul */
+            color: white; /* Cor do texto */
+            transition: background-color 0.3s ease, transform 0.2s ease; /* Transições suaves para animações */
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); /* Sombra para os botões */
+        }
+        /* Efeito ao passar o mouse sobre o botão */
+        button:hover {
+            background-color: #2980b9; /* Azul mais escuro */
+            transform: translateY(-2px); /* Move o botão 2px para cima */
+        }
+        /* Efeito ao clicar no botão */
+        button:active {
+            transform: translateY(0); /* Retorna o botão à posição original */
+        }
+        /* Estilos para a mensagem de status */
+        #status-message {
+            margin-top: 20px;
+            font-weight: bold; /* Deixa o texto em negrito */
+            color: #ecf0f1; /* Cor do texto */
+            font-size: 1.1em; /* Tamanho da fonte maior */
+        }
+        /* Estilos para o contêiner da logo */
+        #logo-container {
+            position: center; /* Posição absoluta em relação ao body */
+            bottom: 40px; /* 20px da parte inferior */
+            left: 40px; /* 20px da parte esquerda */
+            width: 100px; /* Largura da logo */
+            height: auto;
+            opacity: 0.8; /* Transparência inicial */
+            transition: opacity 0.3s ease; /* Transição suave para a transparência */
+        }
+        /* Efeito de passar o mouse na logo */
+        #logo-container:hover {
+            opacity: 1; /* Aumenta a opacidade para 100% */
+        }
+        /* Estilos para a imagem da logo */
+        #logo-container img {
+            max-width: 100%;
+            height: auto;
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <h1>Registro de Presença</h1>
+
+    <div id="video-container">
+        <video id="video-stream" autoplay playsinline></video>
+    </div>
+
+    <div id="controls">
+        <button id="capture-button">Fazer Chamada</button>
+        <button id="register-button">Cadastrar Alunos</button>
+        <button onclick="window.location.href='/admin'">Painel Admin</button>
+    </div>
+
+    <div id="status-message"></div>
+
+    <canvas id="canvas" style="display:none;"></canvas>
+
+    <div id="logo-container">
+        <img src="static/votumaker.png">
+    </div>
+
+    <script>
+        // Seleciona os elementos HTML e armazena em variáveis
+        const videoStream = document.getElementById('video-stream');
+        const captureButton = document.getElementById('capture-button');
+        const registerButton = document.getElementById('register-button');
+        const canvas = document.getElementById('canvas');
+        const context = canvas.getContext('2d');
+        const statusMessage = document.getElementById('status-message');
+
+        // URL base do servidor backend - detecta automaticamente
+        // Se rodando localmente, usa localhost:5000
+        // Se precisar de ngrok, substitua por sua URL do ngrok
+        const BACKEND_URL = "https://fbf8a5993c8a.ngrok-free.app"; //não deixar espaço quando colocar o link
+
+        // 1. Função para iniciar a câmera do usuário
+        async function startCamera() {
+            try {
+                // Solicita acesso à câmera (apenas vídeo)
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                // Atribui o stream de vídeo ao elemento <video>
+                videoStream.srcObject = stream;
+                // Exibe uma mensagem de sucesso
+                statusMessage.textContent = 'Câmera iniciada. Olhe para a lente.';
+            } catch (err) {
+                // Em caso de erro, exibe uma mensagem de erro
+                statusMessage.textContent = 'Erro ao acessar a câmera. Verifique as permissões.';
+                console.error('Erro ao iniciar a câmera:', err);
+            }
+        }
+
+        // 2. Event listener para o botão "Fazer Chamada"
+        captureButton.addEventListener('click', async () => {
+            // Verifica se a câmera está ativa antes de continuar
+            if (!videoStream.srcObject) {
+                statusMessage.textContent = 'Erro: A câmera não está ativa.';
+                return;
+            }
+
+            // Define as dimensões do canvas com base no vídeo
+            canvas.width = videoStream.videoWidth;
+            canvas.height = videoStream.videoHeight;
+            // Desenha o frame atual do vídeo no canvas
+            context.drawImage(videoStream, 0, 0, canvas.width, canvas.height);
+
+            // Converte a imagem do canvas para uma string de dados (Data URL)
+            const imageData = canvas.toDataURL('image/jpeg');
+
+            statusMessage.textContent = 'Analisando imagem...';
+            
+            try {
+                // Envia a imagem para o endpoint de chamada no backend
+                const response = await fetch(`${BACKEND_URL}/chamada_webcam`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        image_data: imageData
+                    })
+                });
+
+                // Converte a resposta do servidor para JSON
+                const result = await response.json();
+                
+                // Trata a resposta do servidor
+                if (response.ok) {
+                    if (result.status === 'presente') {
+                        // Exibe a mensagem de sucesso com o nome e confiança
+                        statusMessage.textContent = `✅ ${result.nome} Foi reconhecido! (Confiança: ${result.confidence.toFixed(2)}%)`;
+                    } else if (result.status === 'ja_presente') {
+                        // Exibe mensagem quando aluno já está presente
+                        statusMessage.textContent = `⚠️ ${result.message}`;
+                    } else {
+                        // Exibe a mensagem de erro retornada pelo backend
+                        statusMessage.textContent = `❌ ${result.message}`;
+                    }
+                } else {
+                    // Exibe o erro do servidor
+                    statusMessage.textContent = `❌ Erro no servidor: ${result.message}`;
+                }
+
+            } catch (error) {
+                // Exibe uma mensagem de erro em caso de falha na conexão
+                statusMessage.textContent = `❌ Erro de conexão: ${error.message}`;
+                console.error('Erro no envio:', error);
+            }
+        });
+
+        // 3. Event listener para o botão "Cadastrar Alunos"
+        registerButton.addEventListener('click', async () => {
+            statusMessage.textContent = 'Iniciando cadastro dos alunos...';
+            try {
+                // Envia uma requisição GET para o endpoint de cadastro no backend
+                const response = await fetch(`${BACKEND_URL}/cadastrar_alunos`);
+                const result = await response.json();
+
+                // Trata a resposta do servidor
+                if (response.ok) {
+                    statusMessage.textContent = `✅ Cadastro concluído. Veja os logs no console do servidor.`;
+                    console.log('Logs do cadastro:', result.log);
+                } else {
+                    statusMessage.textContent = `❌ Erro no cadastro: ${result.message}`;
+                }
+
+            } catch (error) {
+                statusMessage.textContent = `❌ Erro de conexão com o backend: ${error.message}`;
+                console.error('Erro no cadastro:', error);
+            }
+        });
+
+        // Inicia a câmera automaticamente quando a página é carregada
+        window.onload = startCamera;
+    </script>
+</body>
+</html>
