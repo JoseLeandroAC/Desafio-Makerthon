@@ -11,7 +11,7 @@ GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
 def send_test_email():
     msg = EmailMessage()
     msg["From"] = GMAIL_USER
-    msg["To"] = "dede61727@gmail.com"  # Coloque seu e-mail de teste
+    msg["To"] = "vinicius.oliveiratwt@gmail.com"  # Coloque seu e-mail de teste
     msg["Subject"] = "📩 Teste de envio com Python"
     msg.set_content("Olá!\n\nEste é um teste de envio de e-mail com Python + Gmail.\n\nSe você recebeu, está tudo funcionando! ✅")
 
