@@ -9,6 +9,7 @@ from flask_cors import CORS
 from io import BytesIO
 from dotenv import load_dotenv
 
+
 # Carregar variáveis de ambiente
 load_dotenv()
 
@@ -26,6 +27,10 @@ DB_CONFIG = {
     'password': os.getenv('DB_PASSWORD', '123456'),
     'port': int(os.getenv('DB_PORT', 5432))
 }
+
+# Definindo emails
+ARQUIVO_EMAILS = "alunos_emails.json"
+
 
 app = Flask(__name__)
 CORS(app)
