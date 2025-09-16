@@ -4,9 +4,9 @@ try:
     # Conecta ao banco
     conn = psycopg.connect(
         host="localhost",
-        dbname="BancodadosOF",
+        dbname="alunossesi",
         user="postgres",
-        password="SUA_SENHA",
+        password="1234",
         port=5432
     )
     print("Conexão com PostgreSQL bem-sucedida!")

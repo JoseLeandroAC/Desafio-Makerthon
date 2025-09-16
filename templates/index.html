@@ -124,7 +124,7 @@
         // URL base do servidor backend - detecta automaticamente
         // Se rodando localmente, usa localhost:5000
         // Se precisar de ngrok, substitua por sua URL do ngrok
-        const BACKEND_URL = "https://7ecf941d1c1f.ngrok-free.app"; //não deixar espaço quando colocar o link
+        const BACKEND_URL = "https://1eb458b7ff0f.ngrok-free.app"; // URL local
 
         // 1. Função para iniciar a câmera do usuário
         async function startCamera() {
@@ -181,16 +181,28 @@
                     if (result.status === 'presente') {
                         // Exibe a mensagem de sucesso com o nome e confiança
                         statusMessage.textContent = `✅ ${result.nome} Foi reconhecido! (Confiança: ${result.confidence.toFixed(2)}%)`;
+                        statusMessage.style.color = 'green';
+                    } else if (result.status === 'presenca_removida') {
+                        // Exibe mensagem quando presença foi removida
+                        statusMessage.textContent = `🔄 ${result.message}`;
+                        statusMessage.style.color = 'orange';
+                    } else if (result.status === 'turno_incorreto') {
+                        // Exibe mensagem de turno incorreto mas registra mesmo assim
+                        statusMessage.textContent = result.message;
+                        statusMessage.style.color = 'orange';
                     } else if (result.status === 'ja_presente') {
                         // Exibe mensagem quando aluno já está presente
                         statusMessage.textContent = `⚠️ ${result.message}`;
+                        statusMessage.style.color = 'orange';
                     } else {
                         // Exibe a mensagem de erro retornada pelo backend
                         statusMessage.textContent = `❌ ${result.message}`;
+                        statusMessage.style.color = 'red';
                     }
                 } else {
                     // Exibe o erro do servidor
                     statusMessage.textContent = `❌ Erro no servidor: ${result.message}`;
+                    statusMessage.style.color = 'red';
                 }
 
             } catch (error) {

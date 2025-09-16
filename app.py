@@ -27,9 +27,9 @@ ARQUIVO_MAPA = "alunos_tokens.json"
 # DB
 DB_CONFIG = {
     'host': os.getenv('DB_HOST', 'localhost'),
-    'dbname': os.getenv('DB_NAME', 'presenca_alunos'),
+    'dbname': os.getenv('DB_NAME', 'alunossesi'),
     'user': os.getenv('DB_USER', 'postgres'),
-    'password': os.getenv('DB_PASSWORD', '123456'),
+    'password': os.getenv('DB_PASSWORD', '1234'),
     'port': int(os.getenv('DB_PORT', 5432))
 }
 
@@ -149,6 +149,7 @@ def admin_panel():
             cur.execute("""
                 SELECT a.id, a.nome,
                        a.email_responsavel,
+                       a.turno,
                        COALESCE(p.presente, FALSE) as presente,
                        p.horario_presenca,
                        p.confianca
@@ -171,11 +172,12 @@ def admin_panel():
 
         dados_formatados = []
         for row in dados:
-            aluno_id, nome, email_resp, presente, horario, conf = row
+            aluno_id, nome, email_resp, turno, presente, horario, conf = row
             dados_formatados.append({
                 'id': aluno_id,
                 'nome': nome,
                 'email_responsavel': email_resp,
+                'turno': turno,
                 'presente': bool(presente),
                 'horario': horario.strftime('%H:%M:%S') if horario else None,
                 'confianca': float(conf) if conf is not None else None,
@@ -212,14 +214,87 @@ def atualizar_email_responsavel(aluno_id):
         conn.close()
     return redirect(url_for("admin_panel"))
 
+@app.route('/cadastrar_aluno_manual', methods=['POST'])
+def cadastrar_aluno_manual():
+    nome_aluno = request.form.get("nome_aluno", "").strip()
+    email_responsavel = request.form.get("email_responsavel", "").strip()
+    turno = request.form.get("turno", "manhã").strip()
+    
+    if not nome_aluno or not email_responsavel:
+        flash("Nome do aluno e email do responsável são obrigatórios.", "danger")
+        return redirect(url_for("admin_panel"))
+    
+    if "@" not in email_responsavel:
+        flash("E-mail inválido.", "danger")
+        return redirect(url_for("admin_panel"))
+    
+    conn = get_db_connection()
+    if not conn:
+        flash("Erro de conexão com banco.", "danger")
+        return redirect(url_for("admin_panel"))
+    
+    try:
+        with conn, conn.cursor() as cur:
+            # Verificar se aluno já existe
+            cur.execute("SELECT id FROM alunos WHERE nome = %s", (nome_aluno,))
+            if cur.fetchone():
+                flash(f"Aluno '{nome_aluno}' já está cadastrado.", "warning")
+                return redirect(url_for("admin_panel"))
+            
+            # Inserir aluno
+            cur.execute("""
+                INSERT INTO alunos (nome, face_token, email_responsavel, turno)
+                VALUES (%s, %s, %s, %s)
+            """, (nome_aluno, f"manual_{nome_aluno.lower().replace(' ', '_')}", email_responsavel, turno))
+            
+            flash(f"Aluno '{nome_aluno}' cadastrado com sucesso! (Turno: {turno})", "success")
+    except Exception as e:
+        flash(f"Erro ao cadastrar aluno: {e}", "danger")
+    finally:
+        conn.close()
+    
+    return redirect(url_for("admin_panel"))
+
 @app.route('/admin/enviar_avisos')
 def enviar_avisos():
+    # Detectar turno automaticamente baseado no horário atual
+    now = datetime.now()
+    hora_atual = now.hour
+    
+    # Lógica: até 12h = manhã, após 12h = tarde
+    if hora_atual < 12:
+        turno_atual = "manhã"
+        msg_turno = "matutino"
+    else:
+        turno_atual = "tarde" 
+        msg_turno = "vespertino"
+    
     try:
-        enviados = email_ausentes.main()  # hoje
+        enviados = email_ausentes.main(turno_filter=turno_atual)
         if enviados:
-            flash(f"Avisos enviados: {enviados}", "success")
+            flash(f"Avisos do turno {msg_turno} enviados: {enviados} email(s)", "success")
         else:
-            flash("Nenhum ausente hoje ou ninguém com e-mail cadastrado.", "info")
+            flash(f"Nenhum ausente no turno {msg_turno} hoje ou ninguém com e-mail cadastrado.", "info")
+    except Exception as e:
+        flash(f"Erro ao enviar avisos: {e}", "danger")
+    return redirect(url_for("admin_panel"))
+
+@app.route('/admin/enviar_avisos/<turno>')
+def enviar_avisos_turno(turno):
+    if turno not in ['manhã', 'tarde', 'todos']:
+        flash("Turno inválido. Use: manhã, tarde ou todos", "danger")
+        return redirect(url_for("admin_panel"))
+    
+    try:
+        turno_filter = None if turno == 'todos' else turno
+        enviados = email_ausentes.main(turno_filter=turno_filter)
+        
+        if enviados:
+            msg_turno = f"do turno da {turno}" if turno != 'todos' else "de todos os turnos"
+            flash(f"Avisos {msg_turno} enviados: {enviados} email(s)", "success")
+        else:
+            msg_turno = f"no turno da {turno}" if turno != 'todos' else "em nenhum turno"
+            flash(f"Nenhum ausente {msg_turno} hoje ou ninguém com e-mail cadastrado.", "info")
     except Exception as e:
         flash(f"Erro ao enviar avisos: {e}", "danger")
     return redirect(url_for("admin_panel"))
@@ -313,9 +388,38 @@ def chamada_webcam():
         if aluno["confidence"] > 80:
             token = aluno["face_token"]
             nome = alunos_tokens.get(token, "Desconhecido")
+            
+            # Verificar turno do aluno no banco de dados
+            conn = get_db_connection()
+            if conn:
+                try:
+                    with conn, conn.cursor() as cur:
+                        cur.execute("SELECT turno FROM alunos WHERE nome = %s", (nome,))
+                        aluno_data = cur.fetchone()
+                        
+                        if aluno_data:
+                            turno_aluno = aluno_data[0] or "manhã"
+                            
+                            # Detectar turno atual baseado no horário
+                            hora_atual = datetime.now().hour
+                            turno_atual = "manhã" if hora_atual < 12 else "tarde"
+                            
+                            # Validar se o aluno está no turno correto
+                            if turno_aluno != turno_atual:
+                                return jsonify({
+                                    "status": "turno_incorreto", 
+                                    "nome": nome, 
+                                    "message": f"⚠️ {nome} é do turno da {turno_aluno}, mas está tentando fazer chamada no turno da {turno_atual}. Chamada registrada mesmo assim.",
+                                    "turno_aluno": turno_aluno,
+                                    "turno_atual": turno_atual
+                                })
+                finally:
+                    conn.close()
+            
+            # Registrar presença normalmente
             resultado = registrar_presenca(nome, aluno["confidence"])
-            if resultado == "ja_presente":
-                return jsonify({"status": "ja_presente", "nome": nome, "message": f"{nome} já está presente hoje!"})
+            if resultado == "apagada":
+                return jsonify({"status": "presenca_removida", "nome": nome, "message": f"✅ Presença de {nome} foi removida (clique novamente para marcar presente)"})
             elif resultado:
                 return jsonify({"status": "presente", "nome": nome, "confidence": aluno["confidence"]})
             else:
@@ -357,6 +461,21 @@ def ver_presencas():
         conn.close()
 
 # -------------- Scheduler --------------
+def enviar_emails_scheduler():
+    """Função chamada pelo scheduler às 18h para enviar emails inteligentemente"""
+    try:
+        # Às 18h, enviamos emails para AMBOS os turnos (manhã e tarde)
+        # Pois às 18h, ambos os turnos já terminaram
+        enviados_manha = email_ausentes.main(turno_filter="manhã")
+        enviados_tarde = email_ausentes.main(turno_filter="tarde")
+        
+        total_enviados = enviados_manha + enviados_tarde
+        print(f"[SCHEDULER] Emails enviados automaticamente: {enviados_manha} (manhã) + {enviados_tarde} (tarde) = {total_enviados} total")
+        return total_enviados
+    except Exception as e:
+        print(f"[SCHEDULER ERROR] Erro ao enviar emails: {e}")
+        return 0
+
 def start_scheduler():
     tzname = os.getenv("TIMEZONE", "America/Sao_Paulo")
     tz = timezone(tzname)
@@ -364,9 +483,9 @@ def start_scheduler():
     minute = int(os.getenv("EMAIL_SCHEDULE_MINUTE", "0"))
 
     sched = BackgroundScheduler(timezone=tz)
-    sched.add_job(email_ausentes.main, "cron", hour=hour, minute=minute, id="avisos_diarios")
+    sched.add_job(enviar_emails_scheduler, "cron", hour=hour, minute=minute, id="avisos_diarios")
     sched.start()
-    print(f"[SCHEDULER] Avisos diários agendados para {hour:02d}:{minute:02d} ({tzname})")
+    print(f"[SCHEDULER] Avisos diários agendados para {hour:02d}:{minute:02d} ({tzname}) - Enviará para ambos os turnos")
 
 if __name__ == '__main__':
     init_database()
