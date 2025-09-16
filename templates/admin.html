@@ -112,6 +112,22 @@
         .btn-secondary:hover {
             background: #7f8c8d;
         }
+        
+        .btn-warning {
+            background: #f39c12;
+        }
+        
+        .btn-warning:hover {
+            background: #e67e22;
+        }
+        
+        .btn-success {
+            background: #27ae60;
+        }
+        
+        .btn-success:hover {
+            background: #229954;
+        }
     </style>
 </head>
 <body>
@@ -139,15 +155,26 @@
                 <thead>
                     <tr>
                         <th>Nome do Aluno</th>
+                        <th>Email Responsável</th>
+                        <th>Turno</th>
                         <th>Status</th>
                         <th>Horário</th>
                         <th>Confiança</th>
+                        <th>Ações</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for aluno in dados %}
                     <tr>
                         <td>{{ aluno.nome }}</td>
+                        <td>
+                            {% if aluno.email_responsavel %}
+                                {{ aluno.email_responsavel }}
+                            {% else %}
+                                <span style="color: #e74c3c;">❌ Não cadastrado</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ aluno.turno if aluno.turno else 'manhã' }}</td>
                         <td>
                             {% if aluno.presente %}
                                 <span class="presente">✅ PRESENTE</span>
@@ -169,14 +196,62 @@
                                 -
                             {% endif %}
                         </td>
+                        <td>
+                            {% if not aluno.email_responsavel %}
+                                <form method="POST" action="/alunos/{{ aluno.id }}/email" style="display: inline;">
+                                    <input type="email" name="email_responsavel" placeholder="email@exemplo.com" required style="padding: 5px; border-radius: 3px; border: 1px solid #34495e; background: #34495e; color: white; width: 150px; font-size: 12px;">
+                                    <button type="submit" class="btn" style="padding: 5px 10px; font-size: 12px; margin-left: 5px;">💾</button>
+                                </form>
+                            {% else %}
+                                <span style="color: #27ae60;">✓ Cadastrado</span>
+                            {% endif %}
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
         
+        <!-- Formulário de Cadastro Manual -->
+        <div class="card">
+            <h3>📝 Cadastro Manual de Aluno</h3>
+            <form method="POST" action="/cadastrar_aluno_manual" style="display: flex; gap: 15px; flex-wrap: wrap; align-items: end;">
+                <div>
+                    <label for="nome_aluno">Nome do Aluno:</label><br>
+                    <input type="text" id="nome_aluno" name="nome_aluno" required style="padding: 8px; margin-top: 5px; border-radius: 5px; border: 1px solid #34495e; background: #34495e; color: white; width: 200px;">
+                </div>
+                <div>
+                    <label for="email_responsavel">Email do Responsável:</label><br>
+                    <input type="email" id="email_responsavel" name="email_responsavel" required style="padding: 8px; margin-top: 5px; border-radius: 5px; border: 1px solid #34495e; background: #34495e; color: white; width: 250px;">
+                </div>
+                <div>
+                    <label for="turno">Turno:</label><br>
+                    <select id="turno" name="turno" style="padding: 8px; margin-top: 5px; border-radius: 5px; border: 1px solid #34495e; background: #34495e; color: white; width: 120px;">
+                        <option value="manhã">Manhã</option>
+                        <option value="tarde">Tarde</option>
+                    </select>
+                </div>
+                <button type="submit" class="btn" style="height: 40px;">➕ Cadastrar</button>
+            </form>
+        </div>
+
+        <!-- Controles de Email -->
+        <div class="card">
+            <h3>📧 Sistema de Notificação de Ausências</h3>
+            <div style="display: flex; gap: 15px; flex-wrap: wrap; justify-content: center;">
+                <a href="/admin/enviar_avisos" class="btn btn-success">🕐 Enviar (Turno Atual)</a>
+                <a href="/admin/enviar_avisos/manhã" class="btn btn-warning">🌅 Enviar (Manhã)</a>
+                <a href="/admin/enviar_avisos/tarde" class="btn btn-warning">🌇 Enviar (Tarde)</a>
+                <a href="/admin/enviar_avisos/todos" class="btn btn-success">📧 Enviar (Todos os Turnos)</a>
+            </div>
+            <p style="text-align: center; color: #95a5a6; margin-top: 15px; font-size: 14px;">
+                <strong>Automático:</strong> Detecta horário atual (antes 12h = manhã, após 12h = tarde)
+            </p>
+        </div>
+
         <div class="actions">
             <a href="/" class="btn">🏠 Voltar ao Sistema</a>
+            <a href="/cadastrar_alunos" class="btn btn-warning">📸 Cadastrar por Foto</a>
             <a href="/presencas" class="btn btn-secondary">📋 Ver JSON</a>
             <button onclick="window.location.reload()" class="btn btn-secondary">🔄 Atualizar</button>
         </div>
