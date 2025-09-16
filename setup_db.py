@@ -6,11 +6,20 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+<<<<<<< HEAD
 DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = int(os.getenv("DB_PORT", "5432"))
 DB_USER = os.getenv("DB_USER", "postgres")
 DB_PASS = os.getenv("DB_PASSWORD", "123456")
 DB_NAME = os.getenv("DB_NAME", "presenca_alunos")
+=======
+DB_CONFIG = {
+    'host': os.getenv('DB_HOST', 'localhost'),
+    'user': os.getenv('DB_USER', 'postgres'),
+    'password': os.getenv('DB_PASSWORD', '1234'),
+    'port': int(os.getenv('DB_PORT', 5432))
+}
+>>>>>>> 31a7a56530e3f907a68ab283fd4e493e49271072
 
 def create_database_if_needed():
     """Conecta no BD padrão (postgres) e cria DB_NAME se ainda não existir."""
@@ -21,6 +30,7 @@ def create_database_if_needed():
         "connect_timeout": 5,
     }
     try:
+<<<<<<< HEAD
         with psycopg.connect(**dsn_admin) as conn:
             conn.execute("SET client_encoding TO 'UTF8';")
             with conn.cursor(row_factory=tuple_row) as cur:
@@ -31,6 +41,74 @@ def create_database_if_needed():
                     print(f"✅ Banco {DB_NAME} criado.")
                 else:
                     print(f"ℹ️  Banco {DB_NAME} já existe.")
+=======
+<<<<<<< HEAD
+        # Conecta ao PostgreSQL (banco padrão postgres)
+=======
+<<<<<<< HEAD
+        # Conecta ao PostgreSQL (banco padrão postgres)
+=======
+        # Conecta ao PostgreSQL
+>>>>>>> 8cb13ead408bcab59a326599052920c6f779d789
+>>>>>>> c0a18bc647915de72619ff62510b96f22cb649a1
+        conn = psycopg.connect(**DB_CONFIG)
+        conn.autocommit = True
+        cur = conn.cursor()
+        
+        # Verifica se o banco já existe, se não, cria
+        cur.execute("SELECT 1 FROM pg_database WHERE datname = %s", (DB_NAME,))
+        if not cur.fetchone():
+            cur.execute(f'CREATE DATABASE "{DB_NAME}"')
+            print(f"✅ Banco '{DB_NAME}' criado!")
+        else:
+            print(f"ℹ️ Banco '{DB_NAME}' já existe.")
+        
+        cur.close()
+        conn.close()
+        
+        # Conecta ao banco específico e cria as tabelas
+        db_config_with_db = DB_CONFIG.copy()
+        db_config_with_db['dbname'] = DB_NAME
+        
+        conn = psycopg.connect(**db_config_with_db)
+        cur = conn.cursor()
+        
+        # Cria as tabelas
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS alunos (
+                id SERIAL PRIMARY KEY,
+                nome VARCHAR(100) NOT NULL,
+                face_token VARCHAR(255) UNIQUE NOT NULL,
+                data_cadastro TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                email_responsavel TEXT,
+                turno VARCHAR(10) DEFAULT 'manhã'
+            );
+            
+            CREATE TABLE IF NOT EXISTS presencas (
+                id SERIAL PRIMARY KEY,
+                aluno_id INTEGER REFERENCES alunos(id),
+                data_presenca DATE DEFAULT CURRENT_DATE,
+                horario_presenca TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                presente BOOLEAN DEFAULT TRUE,
+                confianca DECIMAL(5,2),
+                UNIQUE(aluno_id, data_presenca)
+            );
+        """)
+        
+        # Adiciona coluna turno se não existir (migração)
+        cur.execute("""
+            ALTER TABLE alunos 
+            ADD COLUMN IF NOT EXISTS turno VARCHAR(10) DEFAULT 'manhã'
+        """)
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        print("✅ Tabelas criadas!")
+        return True
+        
+>>>>>>> 31a7a56530e3f907a68ab283fd4e493e49271072
     except Exception as e:
         print(f"❌ Erro ao criar/verificar banco: {e}")
         raise

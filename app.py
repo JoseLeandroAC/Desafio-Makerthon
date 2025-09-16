@@ -27,9 +27,9 @@ ARQUIVO_MAPA = "alunos_tokens.json"
 # DB
 DB_CONFIG = {
     'host': os.getenv('DB_HOST', 'localhost'),
-    'dbname': os.getenv('DB_NAME', 'presenca_alunos'),
+    'dbname': os.getenv('DB_NAME', 'alunossesi'),
     'user': os.getenv('DB_USER', 'postgres'),
-    'password': os.getenv('DB_PASSWORD', '123456'),
+    'password': os.getenv('DB_PASSWORD', '1234'),
     'port': int(os.getenv('DB_PORT', 5432))
 }
 
