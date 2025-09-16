@@ -35,7 +35,7 @@ DB_CONFIG = {
 
 app = Flask(__name__)
 CORS(app)
-app.secret_key = os.getenv("FLASK_SECRET", "troque-esta-chave")
+app.secret_key = os.getenv("FLASK_SECRET", "votu435maker")
 
 alunos_tokens = {}
 
