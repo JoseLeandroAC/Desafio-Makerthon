@@ -1,4 +1,4 @@
-import psycopg2
+import psycopg
 import os
 from dotenv import load_dotenv
 
@@ -17,7 +17,7 @@ DB_NAME = os.getenv('DB_NAME', 'presenca_alunos')
 def setup_database():
     try:
         # Conecta ao PostgreSQL
-        conn = psycopg2.connect(**DB_CONFIG)
+        conn = psycopg.connect(**DB_CONFIG)
         conn.autocommit = True
         cur = conn.cursor()
         
@@ -29,7 +29,7 @@ def setup_database():
         db_config_with_db = DB_CONFIG.copy()
         db_config_with_db['database'] = DB_NAME
         
-        conn = psycopg2.connect(**db_config_with_db)
+        conn = psycopg.connect(**db_config_with_db)
         cur = conn.cursor()
         
         # Cria as tabelas
@@ -66,3 +66,24 @@ def setup_database():
 if __name__ == "__main__":
     print("🔧 Configurando PostgreSQL...")
     setup_database()
+
+def aluno_ausente(aluno_id):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT presenca, email_responsavel, nome
+        FROM alunos
+        WHERE id = %s
+    """, (aluno_id,))
+    row = cur.fetchone()
+    cur.close()
+    conn.close()
+    if not row:
+        return None  # aluno não encontrado
+    presenca, email_responsavel, nome = row
+    return {
+        "ausente": not presenca,  # True se presenca for False
+        "email": email_responsavel,
+        "nome": nome
+    }
+
