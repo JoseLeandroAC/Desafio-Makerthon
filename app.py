@@ -50,6 +50,41 @@ def salvar_tokens():
     with open(ARQUIVO_MAPA, "w", encoding="utf-8") as f:
         json.dump(alunos_tokens, f, ensure_ascii=False)
 
+def ensure_faceset_exists():
+    """Garante que o FaceSet (outer_id) exista na conta atual."""
+    outer_id = FACESET_ID
+    create_url = "https://api-us.faceplusplus.com/facepp/v3/faceset/create"
+    check_url  = "https://api-us.faceplusplus.com/facepp/v3/faceset/getfacesets"
+
+    # 1) checa se já existe
+    check = request_json_safe(
+        "POST",
+        check_url,
+        data={"api_key": API_KEY, "api_secret": API_SECRET}
+    )
+    if isinstance(check, dict) and check.get("facesets"):
+        for fs in check["facesets"]:
+            if fs.get("outer_id") == outer_id:
+                return True  # já existe
+
+    # 2) tenta criar
+    created = request_json_safe(
+        "POST",
+        create_url,
+        data={"api_key": API_KEY, "api_secret": API_SECRET, "outer_id": outer_id}
+    )
+
+    if created.get("error"):
+        # se já existir, Face++ pode responder erro específico; ignoramos se for isso
+        txt = (created.get("content") or "").upper()
+        if "OUTER_ID" in txt and ("EXIST" in txt or "ALREADY" in txt):
+            return True
+        # log de erro real
+        print("[Face++] erro ao criar faceset:", created)
+        return False
+
+    return True
+
 def carregar_tokens():
     global alunos_tokens
     if os.path.exists(ARQUIVO_MAPA):
@@ -122,14 +157,17 @@ def registrar_presenca(nome_aluno, confianca):
             conn.close()
 
 def request_json_safe(method, url, **kwargs):
+    """Faz requisição e retorna JSON ou o corpo de erro para debug."""
     try:
-        resp = requests.request(method, url, timeout=15, **kwargs)
-        if resp.status_code != 200:
-            return {"error": f"HTTP {resp.status_code}", "content": resp.text[:200]}
-        try:
-            return resp.json()
-        except ValueError:
-            return {"error": "Resposta não é JSON", "content": resp.text[:200]}
+        resp = requests.request(method, url, timeout=20, **kwargs)
+        if resp.status_code == 200:
+            try:
+                return resp.json()
+            except ValueError:
+                return {"error": "Resposta não é JSON", "content": resp.text[:500]}
+        else:
+            # devolve o conteúdo de erro da Face++ para aparecer na tela/log
+            return {"error": f"HTTP {resp.status_code}", "content": resp.text[:800]}
     except requests.exceptions.RequestException as e:
         return {"error": "Falha de requisição", "detalhes": str(e)}
 
