@@ -3,11 +3,11 @@ DB_HOST=localhost
 DB_PORT=5432
 DB_NAME=alunossesi
 DB_USER=postgres
-DB_PASSWORD=1234
+DB_PASSWORD=123456
 
 # Configurações Face++
-API_KEY=OUTmMmgnd1NZh3QIDYvqAZvD3Rv4cJjS
-API_SECRET=TTvZC61AT3b71riYHtspWvU7CrYaNo7k
+FACE_API_KEY=8AJlG2cfflJOYShZZWl7VexpQ4JqXQgr
+FACE_API_SECRET=n-NGSPXVh5ppsfyIvm4--V97jfUHqq-_
 FACESET_ID=ChamadaAlunos
 
 # Configurações Gmail
@@ -19,4 +19,4 @@ EMAIL_SCHEDULE_MINUTE=00
 TIMEZONE=America/Sao_Paulo
 
 # Flask
-FLASK_SECRET=troque-esta-chave
+FLASK_SECRET=votu435maker
