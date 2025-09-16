@@ -3,20 +3,7 @@ import smtplib
 from email.message import EmailMessage
 from dotenv import load_dotenv
 
-<<<<<<< HEAD
-try:
-    # Conecta ao banco
-    conn = psycopg.connect(
-        host="localhost",
-        dbname="alunossesi",
-        user="postgres",
-        password="1234",
-        port=5432
-    )
-    print("Conexão com PostgreSQL bem-sucedida!")
-=======
 load_dotenv()
->>>>>>> c0a18bc647915de72619ff62510b96f22cb649a1
 
 GMAIL_USER = os.getenv("GMAIL_USER")
 GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
