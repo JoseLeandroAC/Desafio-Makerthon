@@ -9,19 +9,22 @@ from flask_cors import CORS
 from io import BytesIO
 from dotenv import load_dotenv
 
-# Agendador
+# Agendador (opcional – se você já usa email_ausentes/main)
 from apscheduler.schedulers.background import BackgroundScheduler
 from pytz import timezone
 
-# módulo de envio
-import email_ausentes
+# módulo de envio (se existir)
+try:
+    import email_ausentes
+except Exception:
+    email_ausentes = None
 
 load_dotenv()
 
 # Face++
-API_KEY="8AJlG2cfflJOYShZZWl7VexpQ4JqXQgr"
-API_SECRET="n-NGSPXVh5ppsfyIvm4--V97jfUHqq-_"
-FACESET_ID = "ChamadaAlunos"
+API_KEY = os.getenv("API_KEY", "")
+API_SECRET = os.getenv("API_SECRET", "")
+FACESET_ID = os.getenv("FACESET_ID", "ChamadaAlunos")
 ARQUIVO_MAPA = "alunos_tokens.json"
 
 # DB
@@ -34,56 +37,17 @@ DB_CONFIG = {
 }
 
 app = Flask(__name__)
-CORS(app, resources={r"/*": {"origins": "*"}}, supports_credentials=False)
+CORS(app)
 app.secret_key = os.getenv("FLASK_SECRET", "troque-esta-chave")
-app.config['MAX_CONTENT_LENGTH'] = 3 * 1024 * 1024  # limite 3MB
 
 alunos_tokens = {}
 
-@app.after_request
-def add_permissions_policy(resp):
-    resp.headers['Permissions-Policy'] = "camera=(self), microphone=(self)"
-    return resp
 
 # ---------------- Helpers ----------------
 def salvar_tokens():
     with open(ARQUIVO_MAPA, "w", encoding="utf-8") as f:
         json.dump(alunos_tokens, f, ensure_ascii=False)
 
-def ensure_faceset_exists():
-    """Garante que o FaceSet (outer_id) exista na conta atual."""
-    outer_id = FACESET_ID
-    create_url = "https://api-us.faceplusplus.com/facepp/v3/faceset/create"
-    check_url  = "https://api-us.faceplusplus.com/facepp/v3/faceset/getfacesets"
-
-    # 1) checa se já existe
-    check = request_json_safe(
-        "POST",
-        check_url,
-        data={"api_key": API_KEY, "api_secret": API_SECRET}
-    )
-    if isinstance(check, dict) and check.get("facesets"):
-        for fs in check["facesets"]:
-            if fs.get("outer_id") == outer_id:
-                return True  # já existe
-
-    # 2) tenta criar
-    created = request_json_safe(
-        "POST",
-        create_url,
-        data={"api_key": API_KEY, "api_secret": API_SECRET, "outer_id": outer_id}
-    )
-
-    if created.get("error"):
-        # se já existir, Face++ pode responder erro específico; ignoramos se for isso
-        txt = (created.get("content") or "").upper()
-        if "OUTER_ID" in txt and ("EXIST" in txt or "ALREADY" in txt):
-            return True
-        # log de erro real
-        print("[Face++] erro ao criar faceset:", created)
-        return False
-
-    return True
 
 def carregar_tokens():
     global alunos_tokens
@@ -93,6 +57,7 @@ def carregar_tokens():
     else:
         alunos_tokens = {}
 
+
 def get_db_connection():
     try:
         return psycopg.connect(**DB_CONFIG)
@@ -100,11 +65,13 @@ def get_db_connection():
         print(f"Erro ao conectar ao banco: {e}")
         return None
 
+
 def init_database():
     conn = get_db_connection()
     if conn:
         try:
             with conn, conn.cursor() as cur:
+                # alunos
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS alunos (
                         id SERIAL PRIMARY KEY,
@@ -115,6 +82,8 @@ def init_database():
                     );
                 """)
                 cur.execute("ALTER TABLE alunos ADD COLUMN IF NOT EXISTS email_responsavel TEXT;")
+
+                # presencas
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS presencas (
                         id SERIAL PRIMARY KEY,
@@ -131,11 +100,13 @@ def init_database():
         finally:
             conn.close()
 
+
 def registrar_presenca(nome_aluno, confianca):
     conn = get_db_connection()
     if conn:
         try:
             with conn, conn.cursor() as cur:
+                # já tem hoje?
                 cur.execute("""
                     SELECT p.id FROM presencas p
                     JOIN alunos a ON p.aluno_id = a.id
@@ -145,6 +116,7 @@ def registrar_presenca(nome_aluno, confianca):
                 if row:
                     cur.execute("DELETE FROM presencas WHERE id = %s", (row[0],))
                     return "apagada"
+                # insere
                 cur.execute("""
                     INSERT INTO presencas (aluno_id, presente, confianca)
                     SELECT id, TRUE, %s FROM alunos WHERE nome = %s
@@ -156,43 +128,67 @@ def registrar_presenca(nome_aluno, confianca):
         finally:
             conn.close()
 
+
 def request_json_safe(method, url, **kwargs):
-    """Faz requisição e retorna JSON ou o corpo de erro para debug."""
+    """Faz requisição e retorna JSON ou erro detalhado."""
     try:
         resp = requests.request(method, url, timeout=20, **kwargs)
-        if resp.status_code == 200:
-            try:
-                return resp.json()
-            except ValueError:
-                return {"error": "Resposta não é JSON", "content": resp.text[:500]}
-        else:
-            # devolve o conteúdo de erro da Face++ para aparecer na tela/log
-            return {"error": f"HTTP {resp.status_code}", "content": resp.text[:800]}
-    except requests.exceptions.RequestException as e:
-        return {"error": "Falha de requisição", "detalhes": str(e)}
+        # Sempre tentamos decodificar JSON, mesmo em 4xx
+        try:
+            body = resp.json()
+        except ValueError:
+            body = {"raw": resp.text[:500]}
 
-def _extract_image_stream(req):
-    """Aceita JSON 'image_data' (dataURL/base64) ou multipart 'image_file'"""
-    if req.is_json:
-        payload = req.get_json(silent=True) or {}
-        img = (payload.get("image_data") or "").strip()
-        if img:
-            try:
-                b64 = img.split(",", 1)[1] if "," in img else img
-                return BytesIO(base64.b64decode(b64))
-            except Exception as e:
-                raise ValueError(f"image_data inválido (base64): {e}")
-    if "image_file" in req.files:
-        f = req.files["image_file"]
-        if not f or f.filename == "":
-            raise ValueError("image_file vazio.")
-        return BytesIO(f.read())
-    raise ValueError("Nenhuma imagem recebida. Envie JSON 'image_data' ou form-data 'image_file'.")
+        if resp.status_code != 200:
+            return {
+                "error": f"HTTP {resp.status_code}",
+                "endpoint": url,
+                "details": body
+            }
+        return body
+    except requests.exceptions.RequestException as e:
+        return {"error": "Falha de requisição", "endpoint": url, "detalhes": str(e)}
+
+
+def ensure_faceset_exists():
+    """Garante que o FaceSet (outer_id) exista. Se não existir, cria."""
+    # 1) tenta obter detalhe
+    get_url = "https://api-us.faceplusplus.com/facepp/v3/faceset/getdetail"
+    get_resp = request_json_safe(
+        "POST",
+        get_url,
+        data={"api_key": API_KEY, "api_secret": API_SECRET, "outer_id": FACESET_ID}
+    )
+    if not isinstance(get_resp, dict):
+        return  # silencioso
+
+    if "error" in get_resp:
+        # Se erro for "FACESET_NOT_FOUND", cria.
+        reason = (get_resp.get("details") or {}).get("error_message", "")
+        if "FACESET_NOT_FOUND" in reason or "FACESET_EXIST" in reason or get_resp["error"].startswith("HTTP 400"):
+            create_url = "https://api-us.faceplusplus.com/facepp/v3/faceset/create"
+            create_resp = request_json_safe(
+                "POST",
+                create_url,
+                data={
+                    "api_key": API_KEY,
+                    "api_secret": API_SECRET,
+                    "outer_id": FACESET_ID,
+                    "display_name": FACESET_ID,
+                    "tag": "chamada"
+                }
+            )
+            # Se ainda assim der erro, só registra no log
+            if "error" in create_resp:
+                print("[Face++] erro ao criar FaceSet:", create_resp)
+        return
+
 
 # ---------------- Rotas ----------------
 @app.route('/')
 def index():
     return render_template("index.html")
+
 
 @app.route('/admin')
 def admin_panel():
@@ -201,6 +197,7 @@ def admin_panel():
         return "Erro de conexão com banco"
     try:
         with conn, conn.cursor() as cur:
+            # lista
             cur.execute("""
                 SELECT a.id, a.nome,
                        a.email_responsavel,
@@ -213,6 +210,8 @@ def admin_panel():
                 ORDER BY a.nome
             """)
             dados = cur.fetchall()
+
+            # stats
             cur.execute("""
                 SELECT COUNT(DISTINCT a.id) as total_alunos,
                        COUNT(CASE WHEN p.presente = TRUE THEN 1 END) as presentes_hoje
@@ -221,6 +220,7 @@ def admin_panel():
                  AND p.data_presenca = CURRENT_DATE
             """)
             stats = cur.fetchone()
+
         dados_formatados = []
         for row in dados:
             aluno_id, nome, email_resp, presente, horario, conf = row
@@ -243,6 +243,7 @@ def admin_panel():
     finally:
         conn.close()
 
+
 @app.route('/alunos/<int:aluno_id>/email', methods=['POST'])
 def atualizar_email_responsavel(aluno_id):
     novo_email = request.form.get("email_responsavel", "").strip()
@@ -264,10 +265,14 @@ def atualizar_email_responsavel(aluno_id):
         conn.close()
     return redirect(url_for("admin_panel"))
 
+
 @app.route('/admin/enviar_avisos')
 def enviar_avisos():
+    if not email_ausentes:
+        flash("Módulo de e-mail não disponível.", "warning")
+        return redirect(url_for("admin_panel"))
     try:
-        enviados = email_ausentes.main()
+        enviados = email_ausentes.main()  # hoje
         if enviados:
             flash(f"Avisos enviados: {enviados}", "success")
         else:
@@ -276,20 +281,28 @@ def enviar_avisos():
         flash(f"Erro ao enviar avisos: {e}", "danger")
     return redirect(url_for("admin_panel"))
 
+
 @app.route('/cadastrar_alunos', methods=['GET'])
 def cadastrar_alunos():
+    """Detecta rostos na pasta 'alunos' e cadastra no Face++ + Banco."""
     carregar_tokens()
     pasta = os.path.join(os.path.dirname(__file__), "alunos")
     if not os.path.exists(pasta):
         return jsonify({"status": "error", "message": "❌ Pasta 'alunos' não encontrada."}), 404
-    arquivos = os.listdir(pasta)
+
+    arquivos = [f for f in os.listdir(pasta) if not f.startswith('.')]
     if not arquivos:
         return jsonify({"status": "warning", "message": "⚠️ Nenhuma foto encontrada na pasta 'alunos'."}), 200
 
+    # Garante FaceSet
+    ensure_faceset_exists()
+
     log_messages = []
+
     for foto in arquivos:
         nome = os.path.splitext(foto)[0]
         caminho = os.path.join(pasta, foto)
+
         with open(caminho, "rb") as f:
             detect_url = "https://api-us.faceplusplus.com/facepp/v3/detect"
             detect_response = request_json_safe(
@@ -298,9 +311,11 @@ def cadastrar_alunos():
                 files={"image_file": f},
                 data={"api_key": API_KEY, "api_secret": API_SECRET}
             )
+
         if detect_response.get("faces"):
             face_token = detect_response["faces"][0]["face_token"]
             alunos_tokens[face_token] = nome
+
             conn = get_db_connection()
             if conn:
                 try:
@@ -315,37 +330,56 @@ def cadastrar_alunos():
                                 INSERT INTO alunos (nome, face_token)
                                 VALUES (%s, %s)
                             """, (nome, face_token))
-                            log_messages.append(f"✅ {nome} cadastrado com sucesso.")
-                            addface_url = "https://api-us.faceplusplus.com/facepp/v3/faceset/addface"
-                            request_json_safe(
-                                "POST",
-                                addface_url,
-                                data={
-                                    "api_key": API_KEY,
-                                    "api_secret": API_SECRET,
-                                    "outer_id": FACESET_ID,
-                                    "face_tokens": face_token
-                                }
-                            )
+                            log_messages.append(f"✅ {nome} cadastrado no banco.")
+
+                    # adiciona no FaceSet
+                    addface_url = "https://api-us.faceplusplus.com/facepp/v3/faceset/addface"
+                    add_resp = request_json_safe(
+                        "POST",
+                        addface_url,
+                        data={
+                            "api_key": API_KEY,
+                            "api_secret": API_SECRET,
+                            "outer_id": FACESET_ID,
+                            "face_tokens": face_token
+                        }
+                    )
+                    if "error" in add_resp:
+                        log_messages.append(f"❌ Face++ addface {nome}: {add_resp}")
+                    else:
+                        log_messages.append(f"✅ Face++ addface OK para {nome}.")
+
                 except Exception as e:
                     log_messages.append(f"❌ Erro ao salvar aluno {nome}: {e}")
                 finally:
                     conn.close()
         else:
-            erro = detect_response.get("error", "Nenhum rosto detectado")
+            erro = detect_response.get("error") or (detect_response.get("details") or {}).get("error_message") or "Nenhum rosto detectado"
             log_messages.append(f"❌ {nome}: {erro}")
+
     salvar_tokens()
     return jsonify({"status": "success", "message": "Cadastro concluído.", "log": log_messages}), 200
 
+
 @app.route('/chamada_webcam', methods=['POST'])
 def chamada_webcam():
+    """Recebe frame base64, consulta Face++ Search no FaceSet e marca presença."""
     carregar_tokens()
+    data = request.get_json(silent=True)
+
+    if not data or "image_data" not in data:
+        return jsonify({"status": "error", "message": "Nenhuma imagem recebida."}), 400
+
     try:
-        image_stream = _extract_image_stream(request)
-    except ValueError as ve:
-        return jsonify({"status": "error", "message": str(ve)}), 400
-    except Exception as e:
-        return jsonify({"status": "error", "message": f"Falha ao processar imagem: {e}"}), 400
+        image_data_base64 = data.get('image_data').split(',')[1]
+    except Exception:
+        return jsonify({"status": "error", "message": "Formato de imagem inválido."}), 400
+
+    image_data_bytes = base64.b64decode(image_data_base64)
+    image_stream = BytesIO(image_data_bytes)
+
+    # Garante FaceSet
+    ensure_faceset_exists()
 
     search_url = "https://api-us.faceplusplus.com/facepp/v3/search"
     response = request_json_safe(
@@ -355,33 +389,29 @@ def chamada_webcam():
         data={"api_key": API_KEY, "api_secret": API_SECRET, "outer_id": FACESET_ID}
     )
 
+    # Tratamento de erro do Face++
+    if "error" in response:
+        return jsonify({"status": "error", "message": f"Face++: {response['error']}", "details": response.get("details")}), 400
+
     if response.get("results"):
         aluno = response["results"][0]
-        try:
-            conf = float(aluno.get("confidence", 0))
-        except Exception:
-            conf = 0.0
-        if conf > 80:
-            token = aluno.get("face_token")
+        if aluno.get("confidence", 0) > 80:
+            token = aluno["face_token"]
             nome = alunos_tokens.get(token, "Desconhecido")
-            resultado = registrar_presenca(nome, conf)
-            if resultado == "ja_presente":
-                return jsonify({"status": "ja_presente", "nome": nome, "message": f"{nome} já está presente hoje!"})
+
+            resultado = registrar_presenca(nome, aluno["confidence"])
+            if resultado == "apagada":
+                return jsonify({"status": "apagada", "nome": nome, "message": f"Presença de {nome} foi removida (toggle)."})
             elif resultado:
-                return jsonify({"status": "presente", "nome": nome, "confidence": conf})
+                return jsonify({"status": "presente", "nome": nome, "confidence": aluno["confidence"]})
             else:
                 return jsonify({"status": "error", "message": "Erro ao registrar presença no banco."}), 500
         else:
-            return jsonify({"status": "nao_identificado", "message": "Rosto detectado, mas não corresponde a nenhum aluno."}), 200
+            return jsonify({"status": "nao_identificado", "message": "Rosto detectado, mas sem confiança suficiente."}), 200
+    else:
+        msg = response.get("error") or (response.get("details") or {}).get("error_message") or "Nenhum rosto detectado"
+        return jsonify({"status": "nao_detectado", "message": msg}), 200
 
-    if "error" in response:
-        return jsonify({
-            "status": "error",
-            "message": f"Face++: {response.get('error')}",
-            "raw": response.get("content")
-        }), 502
-
-    return jsonify({"status": "nao_detectado", "message": "Nenhum rosto detectado."}), 200
 
 @app.route('/presencas')
 def ver_presencas():
@@ -413,8 +443,11 @@ def ver_presencas():
     finally:
         conn.close()
 
-# -------------- Scheduler --------------
+
+# -------------- Scheduler (opcional) --------------
 def start_scheduler():
+    if not email_ausentes:
+        return
     tzname = os.getenv("TIMEZONE", "America/Sao_Paulo")
     tz = timezone(tzname)
     hour = int(os.getenv("EMAIL_SCHEDULE_HOUR", "18"))
@@ -424,13 +457,16 @@ def start_scheduler():
     sched.start()
     print(f"[SCHEDULER] Avisos diários agendados para {hour:02d}:{minute:02d} ({tzname})")
 
+
 if __name__ == '__main__':
     init_database()
     if not os.path.exists("alunos"):
         os.makedirs("alunos")
-    start_scheduler()
+    # start_scheduler()  # habilite se quiser
+
     print("🚀 Sistema iniciado!")
     print("- Interface: http://localhost:5000")
     print("- Admin: http://localhost:5000/admin")
     print("- API: http://localhost:5000/presencas")
+
     app.run(host='0.0.0.0', port=5000, debug=False)
