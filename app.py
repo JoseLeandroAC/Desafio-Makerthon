@@ -19,8 +19,8 @@ import email_ausentes
 load_dotenv()
 
 # Face++
-API_KEY = "OUTmMmgnd1NZh3QIDYvqAZvD3Rv4cJjS"
-API_SECRET = "TTvZC61AT3b71riYHtspWvU7CrYaNo7k"
+API_KEY="8AJlG2cfflJOYShZZWl7VexpQ4JqXQgr"
+API_SECRET="n-NGSPXVh5ppsfyIvm4--V97jfUHqq-_"
 FACESET_ID = "ChamadaAlunos"
 ARQUIVO_MAPA = "alunos_tokens.json"
 
