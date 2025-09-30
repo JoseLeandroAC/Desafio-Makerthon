@@ -12,7 +12,7 @@ load_dotenv()
 PG_CONN = {
     "host": os.getenv("DB_HOST", "localhost"),
     "port": os.getenv("DB_PORT", "5432"),
-    "dbname": os.getenv("DB_NAME", "presenca_alunos"),
+    "dbname": os.getenv("DB_NAME", "alunossesi"),
     "user": os.getenv("DB_USER", "postgres"),
     "password": os.getenv("DB_PASSWORD", "1234"),
 }

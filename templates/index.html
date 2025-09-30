@@ -1,164 +1,157 @@
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
-    <meta charset="UTF-8">
-    <link rel="manifest" href="/manifest.json">
-    <meta name="theme-color" content="#0078d7">
-    <title>Interface de Escaneamento Facial</title>
-    <style>
-        /* Estilos CSS para o corpo da página */
-        body {
-            font-family: Arial, sans-serif; /* Fonte padrão */
-            display: flex; /* Usa flexbox para alinhamento */
-            flex-direction: column; /* Organiza os itens verticalmente */
-            align-items: center; /* Centraliza os itens horizontalmente */
-            padding: 20px;
-            background-color: #071629; /* Cor de fundo escura, nova cor */
-            color: #ecf0f1; /* Cor do texto para contraste */
-            position: relative; /* Essencial para posicionar a logo */
-            min-height: 100vh; /* Garante que o corpo ocupe a altura total da tela */
-        }
-        /* Estilos para o contêiner do vídeo */
-        #video-container {
-            position: relative;
-            width: 640px;
-            height: 480px;
-            border: 2px solid #3498db; /* Borda azul para o contêiner */
-            border-radius: 8px; /* Cantos arredondados */
-            overflow: hidden; /* Oculta qualquer conteúdo que transborde */
-            background-color: #000;
-            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3); /* Sombra para dar profundidade */
-        }
-        /* Estilos para o elemento de vídeo */
-        #video-stream {
-            width: 100%;
-            height: 100%;
-            object-fit: cover; /* Garante que o vídeo preencha todo o contêiner */
-        }
-        /* Estilos para o contêiner dos botões */
-        #controls {
-            margin-top: 20px;
-            display: flex;
-            gap: 15px; /* Espaçamento entre os botões */
-        }
-        /* Estilos para os botões */
-        button {
-            padding: 12px 25px; /* Preenchimento interno */
-            font-size: 17px; /* Tamanho da fonte */
-            cursor: pointer; /* Muda o cursor para indicar que é clicável */
-            border: none; /* Remove a borda padrão */
-            border-radius: 5px; /* Cantos arredondados */
-            background-color: #3498db; /* Cor de fundo azul */
-            color: white; /* Cor do texto */
-            transition: background-color 0.3s ease, transform 0.2s ease; /* Transições suaves para animações */
-            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); /* Sombra para os botões */
-        }
-        /* Efeito ao passar o mouse sobre o botão */
-        button:hover {
-            background-color: #2980b9; /* Azul mais escuro */
-            transform: translateY(-2px); /* Move o botão 2px para cima */
-        }
-        /* Efeito ao clicar no botão */
-        button:active {
-            transform: translateY(0); /* Retorna o botão à posição original */
-        }
-        /* Estilos para a mensagem de status */
-        #status-message {
-            margin-top: 20px;
-            font-weight: bold; /* Deixa o texto em negrito */
-            color: #ecf0f1; /* Cor do texto */
-            font-size: 1.1em; /* Tamanho da fonte maior */
-        }
-        /* Estilos para o contêiner da logo */
-        #logo-container {
-            position: center; /* Posição absoluta em relação ao body */
-            bottom: 40px; /* 20px da parte inferior */
-            left: 40px; /* 20px da parte esquerda */
-            width: 100px; /* Largura da logo */
-            height: auto;
-            opacity: 0.8; /* Transparência inicial */
-            transition: opacity 0.3s ease; /* Transição suave para a transparência */
-        }
-        /* Efeito de passar o mouse na logo */
-        #logo-container:hover {
-            opacity: 1; /* Aumenta a opacidade para 100% */
-        }
-        /* Estilos para a imagem da logo */
-        #logo-container img {
-            max-width: 100%;
-            height: auto;
-            display: block;
-        }
-    </style>
+  <meta charset="UTF-8" />
+  <title>Registro de Presença</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <style>
+    body{background:#0d223a;color:#fff;font-family:system-ui,Segoe UI,Arial,sans-serif;margin:0}
+    .wrap{max-width:980px;margin:40px auto;padding:0 16px}
+    h1{font-weight:700;text-align:center;margin-bottom:20px}
+    .card{background:#0f2a4d;border-radius:16px;padding:16px;box-shadow:0 8px 24px rgba(0,0,0,.25)}
+    #video{width:100%;max-height:520px;border-radius:12px;background:#000;object-fit:cover}
+    .controls{display:flex;gap:16px;justify-content:center;margin:18px 0}
+    .btn{background:#2b6cb0;border:none;color:#fff;padding:12px 18px;border-radius:10px;font-weight:600;cursor:pointer}
+    .btn:disabled{opacity:.6;cursor:not-allowed}
+    #status{margin-top:8px;text-align:center;min-height:24px}
+    #status.error{color:#ff6b6b}
+    #status.ok{color:#2fd57b}
+    pre.log{background:#061629;color:#bfe1ff;border-radius:12px;padding:12px;white-space:pre-wrap}
+  </style>
 </head>
 <body>
+  <div class="wrap">
     <h1>Registro de Presença</h1>
-
-    <div id="video-container">
-        <video id="video-stream" autoplay playsinline></video>
+    <div class="card">
+      <video id="video" autoplay playsinline></video>
+      <div class="controls">
+        <button id="btn-chamada" class="btn">Fazer Chamada</button>
+        <button id="register-button" class="btn">Cadastrar Alunos</button>
+        <a class="btn" href="/admin">Painel Admin</a>
+      </div>
+      <div id="status"></div>
+      <pre class="log" id="log"></pre>
+      <canvas id="canvas" style="display:none;"></canvas>
     </div>
+  </div>
 
-    <div id="controls">
-        <button id="capture-button">Fazer Chamada</button>
-        <button id="register-button">Cadastrar Alunos</button>
-        <button onclick="window.location.href='/admin'">Painel Admin</button>
-    </div>
+  <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const btnChamada = document.getElementById('btn-chamada');
+    const btnRegistrar = document.getElementById('register-button');
+    const statusBox = document.getElementById('status');
+    const logBox = document.getElementById('log');
 
-    <div id="status-message"></div>
+    function setStatus(msg, ok=false){
+      statusBox.textContent = msg;
+      statusBox.className = ok ? 'ok' : 'error';
+    }
+    function setLog(obj){
+      if(!obj){ logBox.textContent = ''; return; }
+      try{ logBox.textContent = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2); }
+      catch{ logBox.textContent = String(obj); }
+    }
 
-    <canvas id="canvas" style="display:none;"></canvas>
+    async function startCamera(){
+      try{
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+        video.srcObject = stream;
+      }catch(e){
+        setStatus('Permita acesso à câmera no navegador.', false);
+        setLog(e);
+      }
+    }
 
-    <div id="logo-container">
-        <img src="static/votumaker.png">
-    </div>
+    function captureFrame(){
+      const w = video.videoWidth || 1280;
+      const h = video.videoHeight || 720;
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, w, h);
+      return canvas.toDataURL('image/jpeg', 0.92);
+    }
 
-    <script>
-        // Seleciona os elementos HTML e armazena em variáveis
-        const videoStream = document.getElementById('video-stream');
-        const captureButton = document.getElementById('capture-button');
-        const registerButton = document.getElementById('register-button');
-        const canvas = document.getElementById('canvas');
-        const context = canvas.getContext('2d');
-        const statusMessage = document.getElementById('status-message');
+    async function fazerChamada(){
+      btnChamada.disabled = true;
+      btnRegistrar.disabled = true;
+      setStatus('Processando...', true);
+      setLog('');
 
+<<<<<<< HEAD
         // URL base do servidor backend - detecta automaticamente
         // Se rodando localmente, usa localhost:5000
         // Se precisar de ngrok, substitua por sua URL do ngrok
         const BACKEND_URL = "https://c0572c43329c.ngrok-free.app"; // URL local
+=======
+      try{
+        const dataURL = captureFrame();
+        const resp = await fetch('/chamada_webcam', {
+          method: 'POST',
+          headers: {'Content-Type':'application/json'},
+          body: JSON.stringify({ image_data: dataURL })
+        });
+>>>>>>> 496dcf95e30163572a46309cda10b2e85bd88dd6
 
-        // 1. Função para iniciar a câmera do usuário
-        async function startCamera() {
-            try {
-                // Solicita acesso à câmera (apenas vídeo)
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-                // Atribui o stream de vídeo ao elemento <video>
-                videoStream.srcObject = stream;
-                // Exibe uma mensagem de sucesso
-                statusMessage.textContent = 'Câmera iniciada. Olhe para a lente.';
-            } catch (err) {
-                // Em caso de erro, exibe uma mensagem de erro
-                statusMessage.textContent = 'Erro ao acessar a câmera. Verifique as permissões.';
-                console.error('Erro ao iniciar a câmera:', err);
-            }
+        const data = await resp.json().catch(()=> ({}));
+        if(!resp.ok){
+          setStatus('Erro no servidor: Face++/Flask', false);
+          setLog(data);
+          return;
         }
 
-        // 2. Event listener para o botão "Fazer Chamada"
-        captureButton.addEventListener('click', async () => {
-            // Verifica se a câmera está ativa antes de continuar
-            if (!videoStream.srcObject) {
-                statusMessage.textContent = 'Erro: A câmera não está ativa.';
-                return;
-            }
+        if(data.status === 'presente'){
+          setStatus(`✅ Presença marcada: ${data.nome} (confiança ${Math.round(data.confidence)}).`, true);
+          setLog('');
+        }else if(data.status === 'apagada'){
+          setStatus(`⚠️ Presença removida (toggle) de ${data.nome}.`, true);
+          setLog('');
+        }else if(data.status === 'nao_identificado'){
+          setStatus('Rosto detectado, mas sem confiança suficiente.', false);
+          setLog(data);
+        }else if(data.status === 'nao_detectado'){
+          setStatus('Nenhum rosto detectado.', false);
+          setLog(data);
+        }else{
+          setStatus('Resposta inesperada do servidor.', false);
+          setLog(data);
+        }
+      }catch(e){
+        setStatus('Falha na requisição.', false);
+        setLog(e);
+      }finally{
+        btnChamada.disabled = false;
+        btnRegistrar.disabled = false;
+      }
+    }
 
-            // Define as dimensões do canvas com base no vídeo
-            canvas.width = videoStream.videoWidth;
-            canvas.height = videoStream.videoHeight;
-            // Desenha o frame atual do vídeo no canvas
-            context.drawImage(videoStream, 0, 0, canvas.width, canvas.height);
+    async function cadastrarAlunos(){
+      btnRegistrar.disabled = true;
+      btnChamada.disabled = true;
+      setStatus('Cadastrando alunos (FaceSet será verificado/criado)...', true);
+      setLog('');
 
-            // Converte a imagem do canvas para uma string de dados (Data URL)
-            const imageData = canvas.toDataURL('image/jpeg');
+      try{
+        const resp = await fetch('/cadastrar_alunos');
+        const data = await resp.json().catch(()=> ({}));
+        if(!resp.ok){
+          setStatus('Erro ao cadastrar alunos.', false);
+          setLog(data);
+          return;
+        }
+        setStatus(data.message || 'Cadastro concluído.', true);
+        setLog(data.log || data);
+      }catch(e){
+        setStatus('Falha na requisição.', false);
+        setLog(e);
+      }finally{
+        btnRegistrar.disabled = false;
+        btnChamada.disabled = false;
+      }
+    }
 
+<<<<<<< HEAD
             statusMessage.textContent = 'Analisando imagem...';
             
             try {
@@ -237,5 +230,11 @@
         // Inicia a câmera automaticamente quando a página é carregada
         window.onload = startCamera;
     </script>
+=======
+    btnChamada.addEventListener('click', fazerChamada);
+    btnRegistrar.addEventListener('click', cadastrarAlunos);
+    startCamera();
+  </script>
+>>>>>>> 496dcf95e30163572a46309cda10b2e85bd88dd6
 </body>
 </html>
