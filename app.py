@@ -22,8 +22,8 @@ except Exception:
 load_dotenv()
 
 # Face++
-API_KEY = os.getenv("FACE_API_KEY", "")  # CORRIGIDO: era "API_KEY" 
-API_SECRET = os.getenv("FACE_API_SECRET", "")  # CORRIGIDO: era "API_SECRET"
+API_KEY = os.getenv("API_KEY", "")
+API_SECRET = os.getenv("API_SECRET", "")
 FACESET_ID = os.getenv("FACESET_ID", "ChamadaAlunos")
 ARQUIVO_MAPA = "alunos_tokens.json"
 
@@ -82,7 +82,6 @@ def init_database():
                     );
                 """)
                 cur.execute("ALTER TABLE alunos ADD COLUMN IF NOT EXISTS email_responsavel TEXT;")
-                cur.execute("ALTER TABLE alunos ADD COLUMN IF NOT EXISTS turno VARCHAR(10) DEFAULT 'manhã';")
 
                 # presencas
                 cur.execute("""
@@ -131,7 +130,7 @@ def registrar_presenca(nome_aluno, confianca):
 
 
 def request_json_safe(method, url, **kwargs):
-    """Faz requisição e retorna JSON ou erro detalhado com debug Face++."""
+    """Faz requisição e retorna JSON ou erro detalhado."""
     try:
         resp = requests.request(method, url, timeout=20, **kwargs)
         # Sempre tentamos decodificar JSON, mesmo em 4xx
@@ -141,36 +140,6 @@ def request_json_safe(method, url, **kwargs):
             body = {"raw": resp.text[:500]}
 
         if resp.status_code != 200:
-            # Debug especial para Face++ HTTP 400
-            if resp.status_code == 400 and "faceplusplus.com" in url:
-                error_msg = body.get('error_message', 'Erro desconhecido')
-                
-                # Mapear erros comuns da Face++
-                if 'INVALID_API_KEY' in error_msg:
-                    debug_msg = "🔑 API Key inválida - Verifique FACE_API_KEY no .env"
-                elif 'INVALID_API_SECRET' in error_msg:
-                    debug_msg = "🔐 API Secret inválido - Verifique FACE_API_SECRET no .env"
-                elif 'IMAGE_ERROR_UNSUPPORTED_FORMAT' in error_msg:
-                    debug_msg = "📸 Formato de imagem não suportado - Use JPG/PNG"
-                elif 'IMAGE_ERROR_IMAGE_TOO_LARGE' in error_msg:
-                    debug_msg = "📏 Imagem muito grande - Máximo 2MB"
-                elif 'FACE_NOT_FOUND' in error_msg:
-                    debug_msg = "👤 Nenhum rosto detectado na imagem"
-                elif 'QUOTA_EXCEEDED' in error_msg:
-                    debug_msg = "📊 Cota da API esgotada - Aguarde renovação"
-                elif 'EMPTY_FACESET' in error_msg:
-                    debug_msg = "👥 FaceSet vazio - Cadastre alunos primeiro usando 'Cadastrar Alunos'"
-                else:
-                    debug_msg = f"❌ Face++ Error: {error_msg}"
-                
-                print(f"[FACE++ DEBUG] {debug_msg}")
-                return {
-                    "error": f"Face++ HTTP{resp.status_code}",
-                    "debug": debug_msg,
-                    "endpoint": url,
-                    "details": body
-                }
-            
             return {
                 "error": f"HTTP {resp.status_code}",
                 "endpoint": url,
@@ -183,8 +152,6 @@ def request_json_safe(method, url, **kwargs):
 
 def ensure_faceset_exists():
     """Garante que o FaceSet (outer_id) exista. Se não existir, cria."""
-    print(f"[FACESET] Verificando/criando FaceSet: {FACESET_ID}")
-    
     # 1) tenta obter detalhe
     get_url = "https://api-us.faceplusplus.com/facepp/v3/faceset/getdetail"
     get_resp = request_json_safe(
@@ -192,18 +159,13 @@ def ensure_faceset_exists():
         get_url,
         data={"api_key": API_KEY, "api_secret": API_SECRET, "outer_id": FACESET_ID}
     )
-    
     if not isinstance(get_resp, dict):
-        print("[FACESET] Erro: resposta não é dict")
-        return
+        return  # silencioso
 
     if "error" in get_resp:
         # Se erro for "FACESET_NOT_FOUND", cria.
         reason = (get_resp.get("details") or {}).get("error_message", "")
-        print(f"[FACESET] FaceSet não existe. Erro: {reason}")
-        
-        if "FACESET_NOT_FOUND" in reason or "INVALID_OUTER_ID" in reason:
-            print(f"[FACESET] Criando novo FaceSet: {FACESET_ID}")
+        if "FACESET_NOT_FOUND" in reason or "FACESET_EXIST" in reason or get_resp["error"].startswith("HTTP 400"):
             create_url = "https://api-us.faceplusplus.com/facepp/v3/faceset/create"
             create_resp = request_json_safe(
                 "POST",
@@ -216,16 +178,10 @@ def ensure_faceset_exists():
                     "tag": "chamada"
                 }
             )
-            
+            # Se ainda assim der erro, só registra no log
             if "error" in create_resp:
-                print(f"[FACESET] ❌ Erro ao criar FaceSet: {create_resp}")
-            else:
-                print(f"[FACESET] ✅ FaceSet criado com sucesso: {FACESET_ID}")
-        else:
-            print(f"[FACESET] ⚠️ Erro não tratado: {reason}")
-    else:
-        print(f"[FACESET] ✅ FaceSet já existe: {FACESET_ID}")
-    return
+                print("[Face++] erro ao criar FaceSet:", create_resp)
+        return
 
 
 # ---------------- Rotas ----------------
@@ -312,60 +268,17 @@ def atualizar_email_responsavel(aluno_id):
 
 @app.route('/admin/enviar_avisos')
 def enviar_avisos():
-    """Envio automático baseado no horário atual"""
     if not email_ausentes:
         flash("Módulo de e-mail não disponível.", "warning")
         return redirect(url_for("admin_panel"))
     try:
-        # Detecta turno atual automaticamente
-        from datetime import datetime
-        hora_atual = datetime.now().hour
-        turno_atual = "manhã" if hora_atual < 12 else "tarde"
-        
-        enviados = email_ausentes.main(turno_filter=turno_atual)
+        enviados = email_ausentes.main()  # hoje
         if enviados:
-            flash(f"📧 Avisos enviados para {enviados} ausentes do turno da {turno_atual}", "success")
+            flash(f"Avisos enviados: {enviados}", "success")
         else:
-            flash(f"ℹ️ Nenhum ausente do turno da {turno_atual} hoje ou ninguém com e-mail cadastrado.", "info")
+            flash("Nenhum ausente hoje ou ninguém com e-mail cadastrado.", "info")
     except Exception as e:
         flash(f"Erro ao enviar avisos: {e}", "danger")
-    return redirect(url_for("admin_panel"))
-
-@app.route('/admin/enviar_avisos/<turno>')
-def enviar_avisos_turno(turno):
-    """Envio específico por turno ou todos"""
-    if not email_ausentes:
-        flash("Módulo de e-mail não disponível.", "warning")
-        return redirect(url_for("admin_panel"))
-    
-    # Validar turno
-    if turno not in ['manhã', 'tarde', 'todos']:
-        flash("Turno inválido. Use: manhã, tarde ou todos", "danger")
-        return redirect(url_for("admin_panel"))
-    
-    try:
-        if turno == 'todos':
-            # Enviar para ambos os turnos
-            enviados_manha = email_ausentes.main(turno_filter="manhã")
-            enviados_tarde = email_ausentes.main(turno_filter="tarde")
-            total_enviados = enviados_manha + enviados_tarde
-            
-            if total_enviados > 0:
-                flash(f"📧 Avisos enviados: {enviados_manha} manhã + {enviados_tarde} tarde = {total_enviados} total", "success")
-            else:
-                flash("ℹ️ Nenhum ausente hoje ou ninguém com e-mail cadastrado.", "info")
-        else:
-            # Enviar para turno específico
-            enviados = email_ausentes.main(turno_filter=turno)
-            if enviados > 0:
-                turno_emoji = "🌅" if turno == "manhã" else "🌇"
-                flash(f"{turno_emoji} Avisos enviados para {enviados} ausentes do turno da {turno}", "success")
-            else:
-                flash(f"ℹ️ Nenhum ausente do turno da {turno} hoje ou ninguém com e-mail cadastrado.", "info")
-                
-    except Exception as e:
-        flash(f"Erro ao enviar avisos: {e}", "danger")
-    
     return redirect(url_for("admin_panel"))
 
 
