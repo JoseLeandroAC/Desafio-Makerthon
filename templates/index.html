@@ -141,7 +141,7 @@
         const resp = await fetch('/chamada_webcam', {
           method: 'POST',
           headers:{ 'Content-Type':'application/json' },
-          body: JSON.stringify({ image_data: imagemBase64 })
+          body: JSON.stringify({ image_data: dataURL})
         });
 
         const data = await resp.json().catch(()=> ({}));
