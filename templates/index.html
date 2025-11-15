@@ -21,23 +21,34 @@
       text-align:center;
       margin-bottom:20px
     }
-    .card{background:#0f2a4d;
+    .card{
+      background:#0f2a4d;
       border-radius:16px;
       padding:16px;
       box-shadow:0 8px 24px rgba(0,0,0,.25)
     }
-    #video{width:100%;
+    #video{
+      width:100%;
       max-height:520px;
       border-radius:12px;
       background:#000;
       object-fit:cover
     }
-    .controls{display:flex;
+    .controls{
+      display:flex;
       gap:16px;
       justify-content:center;
       margin:18px 0
     }
-    
+    .btn{
+      background:#2b6cb0;
+      border:none;
+      color:#fff;
+      padding:12px 18px;
+      border-radius:10px;
+      font-weight:600;
+      cursor:pointer
+    }
     .btn:disabled{
       opacity:.6;
       cursor:not-allowed
@@ -47,8 +58,7 @@
       text-align:center;
       min-height:24px
     }
-    #status.error{
-      color:#ff6b6b}
+    #status.error{color:#ff6b6b}
     #status.ok{color:#2fd57b}
     pre.log{
       background:#061629;
@@ -57,19 +67,21 @@
       padding:12px;
       white-space:pre-wrap
     }
-
   </style>
 </head>
+
 <body>
   <div class="wrap">
     <h1>Registro de Presença</h1>
     <div class="card">
       <video id="video" autoplay playsinline></video>
+
       <div class="controls">
         <button id="btn-chamada" class="btn">Fazer Chamada</button>
         <button id="register-button" class="btn">Cadastrar Alunos</button>
         <a class="btn" href="/admin">Painel Admin</a>
       </div>
+
       <div id="status"></div>
       <pre class="log" id="log"></pre>
       <canvas id="canvas" style="display:none;"></canvas>
@@ -88,6 +100,7 @@
       statusBox.textContent = msg;
       statusBox.className = ok ? 'ok' : 'error';
     }
+
     function setLog(obj){
       if(!obj){ logBox.textContent = ''; return; }
       try{ logBox.textContent = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2); }
@@ -96,7 +109,10 @@
 
     async function startCamera(){
       try{
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "user" },
+          audio: false
+        });
         video.srcObject = stream;
       }catch(e){
         setStatus('Permita acesso à câmera no navegador.', false);
@@ -120,44 +136,36 @@
       setStatus('Processando...', true);
       setLog('');
 
-<<<<<<< HEAD
-        // URL base do servidor backend - detecta automaticamente
-        // Se rodando localmente, usa localhost:5000
-        // Se precisar de ngrok, substitua por sua URL do ngrok
-        const BACKEND_URL = "https://c0572c43329c.ngrok-free.app"; // URL local
-=======
       try{
         const dataURL = captureFrame();
         const resp = await fetch('/chamada_webcam', {
           method: 'POST',
-          headers: {'Content-Type':'application/json'},
+          headers:{ 'Content-Type':'application/json' },
           body: JSON.stringify({ image_data: dataURL })
         });
->>>>>>> 496dcf95e30163572a46309cda10b2e85bd88dd6
 
         const data = await resp.json().catch(()=> ({}));
+
         if(!resp.ok){
-          setStatus('Erro no servidor: Face++/Flask', false);
+          setStatus('Erro no servidor.', false);
           setLog(data);
           return;
         }
 
         if(data.status === 'presente'){
-          setStatus(`✅ Presença marcada: ${data.nome} (confiança ${Math.round(data.confidence)}).`, true);
-          setLog('');
+          setStatus(`✅ Presença marcada: ${data.nome} (confiança ${Math.round(data.confidence)}%).`, true);
         }else if(data.status === 'apagada'){
-          setStatus(`⚠️ Presença removida (toggle) de ${data.nome}.`, true);
-          setLog('');
+          setStatus(`⚠️ Presença removida de ${data.nome}.`, true);
         }else if(data.status === 'nao_identificado'){
           setStatus('Rosto detectado, mas sem confiança suficiente.', false);
           setLog(data);
         }else if(data.status === 'nao_detectado'){
           setStatus('Nenhum rosto detectado.', false);
-          setLog(data);
         }else{
-          setStatus('Resposta inesperada do servidor.', false);
+          setStatus('Resposta inesperada.', false);
           setLog(data);
         }
+
       }catch(e){
         setStatus('Falha na requisição.', false);
         setLog(e);
@@ -170,19 +178,22 @@
     async function cadastrarAlunos(){
       btnRegistrar.disabled = true;
       btnChamada.disabled = true;
-      setStatus('Cadastrando alunos (FaceSet será verificado/criado)...', true);
+      setStatus('Cadastrando alunos...', true);
       setLog('');
 
       try{
         const resp = await fetch('/cadastrar_alunos');
         const data = await resp.json().catch(()=> ({}));
+
         if(!resp.ok){
           setStatus('Erro ao cadastrar alunos.', false);
           setLog(data);
           return;
         }
+
         setStatus(data.message || 'Cadastro concluído.', true);
         setLog(data.log || data);
+
       }catch(e){
         setStatus('Falha na requisição.', false);
         setLog(e);
@@ -192,90 +203,11 @@
       }
     }
 
-<<<<<<< HEAD
-            statusMessage.textContent = 'Analisando imagem...';
-            
-            try {
-                // Envia a imagem para o endpoint de chamada no backend
-                const response = await fetch(`${BACKEND_URL}/chamada_webcam`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify({
-                        image_data: imageData
-                    })
-                });
-
-                // Converte a resposta do servidor para JSON
-                const result = await response.json();
-                
-                // Trata a resposta do servidor
-                if (response.ok) {
-                    if (result.status === 'presente') {
-                        // Exibe a mensagem de sucesso com o nome e confiança
-                        statusMessage.textContent = `✅ ${result.nome} Foi reconhecido! (Confiança: ${result.confidence.toFixed(2)}%)`;
-                        statusMessage.style.color = 'green';
-                    } else if (result.status === 'presenca_removida') {
-                        // Exibe mensagem quando presença foi removida
-                        statusMessage.textContent = `🔄 ${result.message}`;
-                        statusMessage.style.color = 'orange';
-                    } else if (result.status === 'turno_incorreto') {
-                        // Exibe mensagem de turno incorreto mas registra mesmo assim
-                        statusMessage.textContent = result.message;
-                        statusMessage.style.color = 'orange';
-                    } else if (result.status === 'ja_presente') {
-                        // Exibe mensagem quando aluno já está presente
-                        statusMessage.textContent = `⚠️ ${result.message}`;
-                        statusMessage.style.color = 'orange';
-                    } else {
-                        // Exibe a mensagem de erro retornada pelo backend
-                        statusMessage.textContent = `❌ ${result.message}`;
-                        statusMessage.style.color = 'red';
-                    }
-                } else {
-                    // Exibe o erro do servidor
-                    statusMessage.textContent = `❌ Erro no servidor: ${result.message}`;
-                    statusMessage.style.color = 'red';
-                }
-
-            } catch (error) {
-                // Exibe uma mensagem de erro em caso de falha na conexão
-                statusMessage.textContent = `❌ Erro de conexão: ${error.message}`;
-                console.error('Erro no envio:', error);
-            }
-        });
-
-        // 3. Event listener para o botão "Cadastrar Alunos"
-        registerButton.addEventListener('click', async () => {
-            statusMessage.textContent = 'Iniciando cadastro dos alunos...';
-            try {
-                // Envia uma requisição GET para o endpoint de cadastro no backend
-                const response = await fetch(`${BACKEND_URL}/cadastrar_alunos`);
-                const result = await response.json();
-
-                // Trata a resposta do servidor
-                if (response.ok) {
-                    statusMessage.textContent = `✅ Cadastro concluído. Veja os logs no console do servidor.`;
-                    console.log('Logs do cadastro:', result.log);
-                } else {
-                    statusMessage.textContent = `❌ Erro no cadastro: ${result.message}`;
-                }
-
-            } catch (error) {
-                statusMessage.textContent = `❌ Erro de conexão com o backend: ${error.message}`;
-                console.error('Erro no cadastro:', error);
-            }
-        });
-
-        // Inicia a câmera automaticamente quando a página é carregada
-        window.onload = startCamera;
-    </script>
-=======
     btnChamada.addEventListener('click', fazerChamada);
     btnRegistrar.addEventListener('click', cadastrarAlunos);
+
     startCamera();
   </script>
->>>>>>> 496dcf95e30163572a46309cda10b2e85bd88dd6
+
 </body>
 </html>
