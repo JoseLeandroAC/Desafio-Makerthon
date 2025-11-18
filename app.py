@@ -22,7 +22,7 @@ try:
 except Exception:
     BackgroundScheduler = None
 
-# módulo de envio (se existir)
+# módulo de envio (se existir) 
 try:
     import email_ausentes
 except Exception:
