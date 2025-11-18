@@ -32,6 +32,7 @@ load_dotenv()
 
 # Arquivos / pastas
 ARQUIVO_MAPA = "alunos_tokens.json"
+ARQUIVO_MAPA_BAK = "alunos_tokens.bak.json"
 PASTA_ALUNOS = "alunos"                 # pasta com fotos para cadastro (origem)
 PASTA_IMAGENS_CONHECIDAS = "imagens_conhecidas"  # pasta usada pelo DeepFace (destino)
 os.makedirs(PASTA_ALUNOS, exist_ok=True)
@@ -52,6 +53,15 @@ app.secret_key = os.getenv("FLASK_SECRET", "troque-esta-chave")
 
 alunos_tokens = {}  # map face_token/path -> nome (opcional, mantido para compatibilidade)
 
+# Configurações DeepFace via variáveis de ambiente (maior tolerância se ajustado)
+# DEEPFACE_ENFORCE_DETECTION: 'True' (padrão) ou 'False' para permitir buscas mesmo se detector falhar
+# DEEPFACE_CONFIDENCE_THRESHOLD: valor numérico (0..100), padrão 80
+DEEPFACE_ENFORCE_DETECTION = os.getenv("DEEPFACE_ENFORCE_DETECTION", "True").lower() in ("1", "true", "yes")
+try:
+    DEEPFACE_CONFIDENCE_THRESHOLD = float(os.getenv("DEEPFACE_CONFIDENCE_THRESHOLD", "80"))
+except Exception:
+    DEEPFACE_CONFIDENCE_THRESHOLD = 80.0
+
 
 # ---------------- Helpers ----------------
 def salvar_tokens():
@@ -61,9 +71,42 @@ def salvar_tokens():
 
 def carregar_tokens():
     global alunos_tokens
+    # fallback simples: se o arquivo principal estiver vazio/corrompido, tentar um arquivo de backup
     if os.path.exists(ARQUIVO_MAPA):
-        with open(ARQUIVO_MAPA, "r", encoding="utf-8") as f:
-            alunos_tokens = json.load(f)
+        try:
+            # se o arquivo existir mas estiver vazio, tenta carregar o bak se existir
+            if os.path.getsize(ARQUIVO_MAPA) == 0:
+                if os.path.exists(ARQUIVO_MAPA_BAK):
+                    try:
+                        # usa utf-8-sig para suportar arquivos com BOM
+                        with open(ARQUIVO_MAPA_BAK, "r", encoding="utf-8-sig") as f:
+                            alunos_tokens = json.load(f) or {}
+                    except Exception as e:
+                        print(f"Falha ao carregar backup {ARQUIVO_MAPA_BAK}: {e}. Usando dicionário vazio.")
+                        alunos_tokens = {}
+                else:
+                    alunos_tokens = {}
+                return
+
+            # usa utf-8-sig para suportar arquivos com BOM (evita "Unexpected UTF-8 BOM")
+            with open(ARQUIVO_MAPA, "r", encoding="utf-8-sig") as f:
+                alunos_tokens = json.load(f) or {}
+        except (json.JSONDecodeError, ValueError):
+            # arquivo com JSON inválido -> tentar carregar backup, senão usar dict vazio
+            print(f"Aviso: arquivo {ARQUIVO_MAPA} corrompido. Tentando fallback {ARQUIVO_MAPA_BAK}.")
+            if os.path.exists(ARQUIVO_MAPA_BAK):
+                try:
+                    with open(ARQUIVO_MAPA_BAK, "r", encoding="utf-8-sig") as f:
+                        alunos_tokens = json.load(f) or {}
+                except Exception as e:
+                    print(f"Falha ao carregar backup {ARQUIVO_MAPA_BAK}: {e}. Usando dicionário vazio.")
+                    alunos_tokens = {}
+            else:
+                alunos_tokens = {}
+        except Exception as e:
+            # qualquer outro erro não deve quebrar a rota
+            print(f"Erro ao carregar tokens: {e}")
+            alunos_tokens = {}
     else:
         alunos_tokens = {}
 
@@ -153,11 +196,14 @@ def deepface_search_frame(frame):
     Retorna: dict com keys: 'found'(bool), 'nome', 'distance'(float) se aplicável, 'raw' (DataFrame convertido)
     """
     try:
+        # usa configuração de enforce_detection a partir da variável DEEPFACE_ENFORCE_DETECTION
+        if not DEEPFACE_ENFORCE_DETECTION:
+            print("Aviso: DeepFace enforcement disabled (DEEPFACE_ENFORCE_DETECTION=False). Isso aumenta tolerância, mas pode aumentar falsos positivos.")
         resultados = DeepFace.find(
             img_path=frame,
             db_path=DB_PATH,
             model_name="VGG-Face",
-            enforce_detection=True,
+            enforce_detection=DEEPFACE_ENFORCE_DETECTION,
             detector_backend="opencv",
             silent=True
         )
@@ -378,8 +424,8 @@ def chamada_webcam():
         distancia = resultado.get("distance")
         confidence = distance_to_confidence(distancia)  # 0..100
 
-        # threshold: considerar presente se confidence > 80 (mesmo critério que você usava anteriormente)
-        if confidence > 80:
+        # threshold: considerar presente se confidence > DEEPFACE_CONFIDENCE_THRESHOLD (configurável)
+        if confidence > DEEPFACE_CONFIDENCE_THRESHOLD:
             registro = registrar_presenca(nome, confidence)
             if registro == "apagada":
                 return jsonify({"status": "apagada", "nome": nome, "message": f"Presença de {nome} foi removida (toggle)."})
