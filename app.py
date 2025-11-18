@@ -204,7 +204,7 @@ def deepface_search_frame(frame):
             db_path=DB_PATH,
             model_name="VGG-Face",
             enforce_detection=DEEPFACE_ENFORCE_DETECTION,
-            detector_backend="opencv",
+            detector_backend="retinaface",
             silent=True
         )
         if resultados and not resultados[0].empty:
@@ -388,59 +388,83 @@ def cadastrar_alunos():
 
 @app.route('/chamada_webcam', methods=['POST'])
 def chamada_webcam():
-    """Recebe frame base64, usa DeepFace.find local (imagens_conhecidas) e marca presença."""
-    carregar_tokens()
-    data = request.get_json(silent=True)
-
-    if not data or "image_data" not in data:
-        return jsonify({"status": "error", "message": "Nenhuma imagem recebida."}), 400
-
     try:
-        # extrai base64 (suporta 'data:image/jpeg;base64,...' ou só o base64)
-        raw = data.get('image_data')
-        if ',' in raw:
-            image_data_base64 = raw.split(',')[1]
-        else:
-            image_data_base64 = raw
-    except Exception:
-        return jsonify({"status": "error", "message": "Formato de imagem inválido."}), 400
+        data = request.get_json()
 
-    try:
-        image_data_bytes = base64.b64decode(image_data_base64)
-    except Exception:
-        return jsonify({"status": "error", "message": "Base64 inválido."}), 400
+        # --- VERIFICAÇÃO INICIAL ---
+        if not data or 'image_data' not in data:
+            return jsonify({"erro": "Nenhuma imagem enviada"}), 400
 
-    # converte para frame OpenCV BGR
-    np_arr = np.frombuffer(image_data_bytes, np.uint8)
-    frame = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-    if frame is None:
-        return jsonify({"status": "error", "message": "Imagem inválida ou incompativel."}), 400
+        base64_image = data['image_data']
 
-    # Faz a busca local com DeepFace
-    resultado = deepface_search_frame(frame)
+        # --- REMOVE PREFIXO "data:image/jpeg;base64," ---
+        if base64_image.startswith("data:image"):
+            try:
+                base64_image = base64_image.split(",")[1]
+            except Exception:
+                return jsonify({"erro": "Base64 inválida"}), 400
 
-    if resultado.get("found"):
-        nome = resultado.get("nome", "Desconhecido")
-        distancia = resultado.get("distance")
-        confidence = distance_to_confidence(distancia)  # 0..100
+        # --- DECODIFICA BASE64 PARA BYTES ---
+        try:
+            image_bytes = base64.b64decode(base64_image)
+        except Exception:
+            return jsonify({"erro": "Erro ao decodificar base64"}), 400
 
-        # threshold: considerar presente se confidence > DEEPFACE_CONFIDENCE_THRESHOLD (configurável)
-        if confidence > DEEPFACE_CONFIDENCE_THRESHOLD:
-            registro = registrar_presenca(nome, confidence)
-            if registro == "apagada":
-                return jsonify({"status": "apagada", "nome": nome, "message": f"Presença de {nome} foi removida (toggle)."})
-            elif registro:
-                # Mantemos a chave 'confidence' para compatibilidade com frontend
-                return jsonify({"status": "presente", "nome": nome, "confidence": confidence})
-            else:
-                return jsonify({"status": "error", "message": "Erro ao registrar presença no banco."}), 500
-        else:
-            return jsonify({"status": "nao_identificado", "message": "Rosto detectado, mas sem confiança suficiente.", "confidence": confidence}), 200
-    else:
-        # Se DeepFace retornou erro
-        if "error" in resultado:
-            return jsonify({"status": "error", "message": resultado.get("error")}), 400
-        return jsonify({"status": "nao_detectado", "message": "Nenhum rosto detectado."}), 200
+        # --- LÊ IMAGEM COM CV2 ---
+        npimg = np.frombuffer(image_bytes, np.uint8)
+        frame = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
+
+        if frame is None:
+            return jsonify({"erro": "Erro ao converter imagem (cv2.imdecode)"})
+
+        # --- DEBUG OPCIONAL: salvar frame ---
+        # cv2.imwrite("ultimo_frame_debug.jpg", frame)
+
+        # --- GARANTIR FORMATO RGB PARA DEEPFACE ---
+        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+
+        # --- DEEPFACE FIND ---
+        try:
+            resultados = DeepFace.find(
+                img_path=frame_rgb,
+                db_path=DB_PATH,
+                model_name="VGG-Face",
+                enforce_detection=DEEPFACE_ENFORCE_DETECTION,
+                detector_backend="retinaface",       # 🔥 DETECTOR MELHOR
+                silent=True
+            )
+        except Exception as e:
+            return jsonify({"erro": f"DeepFace erro: {str(e)}"}), 500
+
+        # --- NADA ENCONTRADO ---
+        if len(resultados) == 0 or resultados[0].empty:
+            return jsonify({"status": "desconhecido"}), 200
+
+        df = resultados[0]
+
+        # --- IDENTIDADE ENCONTRADA ---
+        caminho_match = df.iloc[0]["identity"]
+
+        nome = os.path.basename(os.path.dirname(caminho_match))
+
+        # --- DISTÂNCIA (CONFIANÇA) ---
+        try:
+            distancia = float(df.iloc[0]["VGG-Face_cosine"])
+            confianca = round((1 - distancia) * 100, 2)
+        except:
+            confianca = None
+
+        # --- SE QUISER, AQUI VOCÊ PODE REGISTRAR NO BANCO ---
+        # registrar_presenca_pg(nome)
+
+        return jsonify({
+            "status": "ok",
+            "aluno": nome,
+            "confianca": confianca
+        })
+
+    except Exception as e:
+        return jsonify({"erro": f"Erro geral: {str(e)}"}), 500
 
 
 @app.route('/presencas')
