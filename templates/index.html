@@ -168,11 +168,15 @@
           return;
         }
 
-        if (data.status === 'ok') {
-          setStatus(`🎉 Identificado: ${data.aluno}`, true);
+        if (data.status === 'presente') {
+          setStatus(`🎉 Identificado: ${data.nome} (confiança ${Math.round(data.confidence)}%)`, true);
           setLog(data);
         }
-        else if (data.status === 'desconhecido') {
+        else if (data.status === 'apagada') {
+          setStatus(`⚠️ Presença removida de ${data.nome}`, false);
+          setLog(data);
+        }
+        else if (data.status === 'nao_identificado') {
           setStatus('⚠️ Rosto não reconhecido.', false);
           setLog(data);
         }
@@ -184,6 +188,7 @@
           setStatus('Resposta inesperada.', false);
           setLog(data);
         }
+
 
 
       } catch (e) {

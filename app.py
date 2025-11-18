@@ -278,14 +278,25 @@ def admin_panel():
         dados_formatados = []
         for row in dados:
             aluno_id, nome, email_resp, presente, horario, conf = row
-            dados_formatados.append({
-                'id': aluno_id,
-                'nome': nome,
-                'email_responsavel': email_resp,
-                'presente': bool(presente),
-                'horario': horario.strftime('%H:%M:%S') if horario else None,
-                'confianca': float(conf) if conf is not None else None,
-            })
+            try:
+                horario_str = horario.strftime('%H:%M:%S') if horario else None
+            except Exception:
+                horario_str = None
+
+            try:
+                confianca_val = float(conf) if conf is not None else None
+            except Exception:
+                confianca_val = None
+
+        dados_formatados.append({
+            'id': aluno_id,
+            'nome': nome,
+            'email_responsavel': email_resp,
+            'presente': bool(presente) if presente is not None else False,
+            'horario': horario_str,
+            'confianca': confianca_val,
+        })
+
         data_hoje = datetime.now().strftime('%d/%m/%Y')
         return render_template("admin.html",
                                dados=dados_formatados,
@@ -391,80 +402,134 @@ def chamada_webcam():
     try:
         data = request.get_json()
 
-        # --- VERIFICAÇÃO INICIAL ---
-        if not data or 'image_data' not in data:
-            return jsonify({"erro": "Nenhuma imagem enviada"}), 400
+        if not data or "image_data" not in data:
+            return jsonify({"status": "erro", "message": "Imagem não recebida"}), 400
 
-        base64_image = data['image_data']
-
-        # --- REMOVE PREFIXO "data:image/jpeg;base64," ---
-        if base64_image.startswith("data:image"):
-            try:
-                base64_image = base64_image.split(",")[1]
-            except Exception:
-                return jsonify({"erro": "Base64 inválida"}), 400
-
-        # --- DECODIFICA BASE64 PARA BYTES ---
+        # ====== 1. Decodificar Base64 ======
+        image_data = data["image_data"].split(",")[-1]
         try:
-            image_bytes = base64.b64decode(base64_image)
+            img_bytes = base64.b64decode(image_data)
         except Exception:
-            return jsonify({"erro": "Erro ao decodificar base64"}), 400
+            return jsonify({"status": "erro", "message": "Base64 inválido"}), 400
 
-        # --- LÊ IMAGEM COM CV2 ---
-        npimg = np.frombuffer(image_bytes, np.uint8)
-        frame = cv2.imdecode(npimg, cv2.IMREAD_COLOR)
+        img_array = np.frombuffer(img_bytes, np.uint8)
+        frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
 
         if frame is None:
-            return jsonify({"erro": "Erro ao converter imagem (cv2.imdecode)"})
+            return jsonify({"status": "erro", "message": "Falha ao decodificar imagem"}), 400
 
-        # --- DEBUG OPCIONAL: salvar frame ---
-        # cv2.imwrite("ultimo_frame_debug.jpg", frame)
-
-        # --- GARANTIR FORMATO RGB PARA DEEPFACE ---
-        frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-
-        # --- DEEPFACE FIND ---
+        # ====== 2. DeepFace.find ======
         try:
-            resultados = DeepFace.find(
-                img_path=frame_rgb,
-                db_path=DB_PATH,
+            results = DeepFace.find(
+                img_path=frame,
+                db_path="imagens_conhecidas",
                 model_name="VGG-Face",
-                enforce_detection=DEEPFACE_ENFORCE_DETECTION,
-                detector_backend="retinaface",       # 🔥 DETECTOR MELHOR
+                enforce_detection=False,
                 silent=True
             )
         except Exception as e:
-            return jsonify({"erro": f"DeepFace erro: {str(e)}"}), 500
+            return jsonify({"status": "erro", "message": str(e)}), 500
 
-        # --- NADA ENCONTRADO ---
-        if len(resultados) == 0 or resultados[0].empty:
-            return jsonify({"status": "desconhecido"}), 200
+        # ====== 3. Verifica resultados ======
+        if results is None or len(results) == 0 or results[0].empty:
+            return jsonify({
+                "status": "nao_identificado",
+                "nome": None,
+                "confidence": 0
+            })
 
-        df = resultados[0]
+        df = results[0]
 
-        # --- IDENTIDADE ENCONTRADA ---
-        caminho_match = df.iloc[0]["identity"]
+        # garante que existam todas as colunas necessárias
+        required_columns = ["identity", "distance"]
+        for col in required_columns:
+            if col not in df.columns:
+                df[col] = None
 
-        nome = os.path.basename(os.path.dirname(caminho_match))
+        # remove linhas vazias ou com valores None na coluna "distance"
+        df = df[df["distance"].notna()].reset_index(drop=True)
+        if df.empty:
+            return jsonify({
+                "status": "nao_identificado",
+                "nome": None,
+                "confidence": 0
+            })
 
-        # --- DISTÂNCIA (CONFIANÇA) ---
+        df = df.sort_values(by="distance", ascending=True).reset_index(drop=True)
+        best = df.iloc[0]
+
+        distance = float(best["distance"])
+        confidence = max(0, 100 - (distance * 100))
+        confidence = round(confidence, 2)
+
+        # ====== 4. Nome ======
+        path = best["identity"]
+        nome = os.path.basename(os.path.dirname(path)) if path else None
+
+        # ====== 5. Verificação de confiança ======
+        LIMIAR = 50
+        if confidence < LIMIAR or not nome:
+            return jsonify({
+                "status": "nao_identificado",
+                "nome": None,
+                "confidence": confidence
+            })
+
+        # ====== 6. Registrar presença ======
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({"status": "erro", "message": "Falha ao conectar ao banco"}), 500
+
         try:
-            distancia = float(df.iloc[0]["VGG-Face_cosine"])
-            confianca = round((1 - distancia) * 100, 2)
-        except:
-            confianca = None
+            with conn, conn.cursor() as cur:
+                # pegar id do aluno
+                cur.execute("SELECT id FROM alunos WHERE nome = %s", (nome,))
+                aluno_row = cur.fetchone()
 
-        # --- SE QUISER, AQUI VOCÊ PODE REGISTRAR NO BANCO ---
-        # registrar_presenca_pg(nome)
+                if not aluno_row:
+                    return jsonify({
+                        "status": "nao_identificado",
+                        "nome": None,
+                        "confidence": confidence
+                    })
 
+                aluno_id = aluno_row[0]
+
+                # verificar presença hoje
+                cur.execute("""
+                    SELECT id FROM presencas
+                    WHERE aluno_id = %s AND data_presenca = CURRENT_DATE
+                """, (aluno_id,))
+                existente = cur.fetchone()
+
+                if existente:
+                    # apaga (toggle)
+                    cur.execute("DELETE FROM presencas WHERE id = %s", (existente[0],))
+                    acao = "apagada"
+                else:
+                    # registra
+                    cur.execute("""
+                        INSERT INTO presencas (aluno_id, confianca)
+                        VALUES (%s, %s)
+                    """, (aluno_id, confidence))
+                    acao = "registrada"
+
+        except Exception as e:
+            return jsonify({"status": "erro", "message": f"Erro no banco: {e}"})
+        finally:
+            conn.close()
+
+        # ====== 7. Retorno ======
         return jsonify({
-            "status": "ok",
-            "aluno": nome,
-            "confianca": confianca
+            "status": "presente" if acao == "registrada" else "apagada",
+            "nome": nome,
+            "confidence": confidence
         })
 
     except Exception as e:
-        return jsonify({"erro": f"Erro geral: {str(e)}"}), 500
+        return jsonify({"status": "erro", "message": str(e)}), 500
+
+
 
 
 @app.route('/presencas')
