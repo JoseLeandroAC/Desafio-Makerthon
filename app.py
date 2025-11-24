@@ -44,7 +44,7 @@ os.makedirs(PASTA_IMAGENS_CONHECIDAS, exist_ok=True)
 # DB
 DB_CONFIG = {
     'host': os.getenv('DB_HOST', 'localhost'),
-    'dbname': os.getenv('DB_NAME', 'presenca_alunos'),
+    'dbname': os.getenv('DB_NAME', 'BancodadosOF'),
     'user': os.getenv('DB_USER', 'postgres'),
     'password': os.getenv('DB_PASSWORD', '123456'),
     'port': int(os.getenv('DB_PORT', 5432))
@@ -360,24 +360,41 @@ def cadastrar_alunos():
                 cur.execute("SELECT id FROM alunos WHERE nome = %s", (nome,))
                 existe = cur.fetchone()
                 if existe:
-                    log_messages.append(f"⚠️ {nome} já cadastrado.")
+                    # Já existe aluno → apenas atualizar face_token
+                    cur.execute("""
+                        UPDATE alunos 
+                        SET face_token = %s 
+                        WHERE nome = %s
+                    """, (face_token, nome))
+                    log_messages.append(f"🔄 Aluno '{nome}' atualizado com novo face_token.")
                 else:
+                    # Não existe → criar novo aluno
                     cur.execute("""
                         INSERT INTO alunos (nome, face_token)
                         VALUES (%s, %s)
+                        RETURNING id
                     """, (nome, face_token))
-                    log_messages.append(f"✅ {nome} cadastrado.")
-                    alunos_tokens[face_token] = nome
+                    log_messages.append(f"✅ Aluno '{nome}' cadastrado com sucesso!")
+
+                conn.commit()
+
         except Exception as e:
-            log_messages.append(f"❌ Falha ao registrar {nome}: {e}")
+            log_messages.append(f"❌ Erro ao salvar '{nome}' no banco: {e}")
         finally:
             conn.close()
+
+        # Atualiza mapa local
+        alunos_tokens[nome] = face_token
+
+    # Salvar tokens no JSON
     salvar_tokens()
+
     return jsonify({
         "status": "success",
         "message": "Cadastro concluído.",
         "log": log_messages
     }), 200
+
 
 # Rota principal usada pelo seu front (converte, busca e registra)
 @app.route('/chamada_webcam', methods=['POST'])
