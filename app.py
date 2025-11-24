@@ -249,9 +249,10 @@ def admin_panel():
     conn = get_db_connection()
     if not conn:
         return "Erro de conexão com banco"
+
     try:
         with conn, conn.cursor() as cur:
-            # lista
+            # Lista de alunos + presença (HOJE)
             cur.execute("""
                 SELECT a.id, a.nome,
                        a.email_responsavel,
@@ -265,7 +266,7 @@ def admin_panel():
             """)
             dados = cur.fetchall()
 
-            # stats
+            # Estatísticas
             cur.execute("""
                 SELECT COUNT(DISTINCT a.id) as total_alunos,
                        COUNT(CASE WHEN p.presente = TRUE THEN 1 END) as presentes_hoje
@@ -275,38 +276,50 @@ def admin_panel():
             """)
             stats = cur.fetchone()
 
+        # --- Agora FORA do "with", mas dentro do TRY ---
         dados_formatados = []
         for row in dados:
             aluno_id, nome, email_resp, presente, horario, conf = row
-            try:
-                horario_str = horario.strftime('%H:%M:%S') if horario else None
-            except Exception:
+
+            presente_bool = bool(presente)
+
+            # Converte horário
+            if isinstance(horario, datetime):
+                horario_str = horario.strftime('%H:%M:%S')
+            else:
                 horario_str = None
 
+            # Confiança sempre float ou None
             try:
                 confianca_val = float(conf) if conf is not None else None
-            except Exception:
+            except:
                 confianca_val = None
 
-        dados_formatados.append({
-            'id': aluno_id,
-            'nome': nome,
-            'email_responsavel': email_resp,
-            'presente': bool(presente) if presente is not None else False,
-            'horario': horario_str,
-            'confianca': confianca_val,
-        })
+            dados_formatados.append({
+                "id": aluno_id,
+                "nome": nome,
+                "email_responsavel": email_resp or "",
+                "presente": presente_bool,
+                "horario": horario_str,
+                "confianca": confianca_val
+            })
 
         data_hoje = datetime.now().strftime('%d/%m/%Y')
-        return render_template("admin.html",
-                               dados=dados_formatados,
-                               total_alunos=stats[0],
-                               presentes_hoje=stats[1],
-                               data_hoje=data_hoje)
+
+        return render_template(
+            "admin.html",
+            dados=dados_formatados,
+            total_alunos=stats[0],
+            presentes_hoje=stats[1],
+            data_hoje=data_hoje
+        )
+
     except Exception as e:
         return f"Erro: {e}"
+
     finally:
         conn.close()
+
 
 
 @app.route('/alunos/<int:aluno_id>/email', methods=['POST'])
