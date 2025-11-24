@@ -9,6 +9,7 @@ from io import BytesIO
 from dotenv import load_dotenv
 from shutil import copy2, rmtree
 from pathlib import Path
+import pandas
 
 # DeepFace local
 from deepface import DeepFace
@@ -346,14 +347,9 @@ def atualizar_email_responsavel(aluno_id):
 
 @app.route('/cadastrar_alunos', methods=['GET'])
 def cadastrar_alunos():
-    """
-    Lê imagens da pasta 'alunos', para cada arquivo:
-     - cria pasta imagens_conhecidas/<nome> e copia a imagem para lá
-     - insere o aluno na tabela 'alunos' com face_token = caminho relativo
-    Observação: o nome do arquivo (sem extensão) será usado como nome do aluno.
-    """
     carregar_tokens()
     pasta = os.path.join(os.path.dirname(__file__), PASTA_ALUNOS)
+
     if not os.path.exists(pasta):
         return jsonify({"status": "error", "message": "❌ Pasta 'alunos' não encontrada."}), 404
 
@@ -367,182 +363,183 @@ def cadastrar_alunos():
         nome = os.path.splitext(foto)[0]
         caminho_origem = os.path.join(pasta, foto)
 
-        # cria subpasta em imagens_conhecidas com o nome do aluno
-        destino_dir = os.path.join(os.path.dirname(__file__), DB_PATH, nome)
+        destino_dir = os.path.join(PASTA_IMAGENS_CONHECIDAS, nome)
         os.makedirs(destino_dir, exist_ok=True)
 
-        # copiar arquivo (mantém o mesmo nome)
         destino_path = os.path.join(destino_dir, foto)
+
         try:
             copy2(caminho_origem, destino_path)
         except Exception as e:
             log_messages.append(f"❌ Erro ao copiar {foto}: {e}")
             continue
 
-        # registrar no banco (usar caminho relativo como token)
-        face_token = os.path.relpath(destino_path)
+        face_token = os.path.relpath(destino_path, start=os.path.dirname(__file__))
 
         conn = get_db_connection()
-        if conn:
-            try:
-                with conn, conn.cursor() as cur:
-                    cur.execute("SELECT id FROM alunos WHERE nome = %s OR face_token = %s",
-                                (nome, face_token))
-                    existente = cur.fetchone()
-                    if existente:
-                        log_messages.append(f"⚠️ {nome} já está cadastrado.")
-                    else:
-                        cur.execute("""
-                            INSERT INTO alunos (nome, face_token)
-                            VALUES (%s, %s)
-                        """, (nome, face_token))
-                        log_messages.append(f"✅ {nome} cadastrado no banco.")
-                        alunos_tokens[face_token] = nome
-            except Exception as e:
-                log_messages.append(f"❌ Erro ao salvar aluno {nome}: {e}")
-            finally:
-                conn.close()
-        else:
+        if not conn:
             log_messages.append(f"❌ Erro de conexão ao salvar {nome}.")
+            continue
+
+        try:
+            with conn, conn.cursor() as cur:
+                cur.execute("SELECT id FROM alunos WHERE nome = %s", (nome,))
+                existe = cur.fetchone()
+
+                if existe:
+                    log_messages.append(f"⚠️ {nome} já cadastrado.")
+                else:
+                    cur.execute("""
+                        INSERT INTO alunos (nome, face_token)
+                        VALUES (%s, %s)
+                    """, (nome, face_token))
+
+                    log_messages.append(f"✅ {nome} cadastrado.")
+                    alunos_tokens[face_token] = nome
+
+        except Exception as e:
+            log_messages.append(f"❌ Falha ao registrar {nome}: {e}")
+        finally:
+            conn.close()
 
     salvar_tokens()
-    # retornar logs
-    return jsonify({"status": "success", "message": "Cadastro concluído.", "log": log_messages}), 200
+
+    return jsonify({
+        "status": "success",
+        "message": "Cadastro concluído.",
+        "log": log_messages
+    }), 200
 
 
 @app.route('/chamada_webcam', methods=['POST'])
 def chamada_webcam():
+    """
+    Recebe JSON { image_data: 'data:image/jpeg;base64,...' }
+    Retorna JSON compatível com o seu front:
+      - { status: "ok", aluno: "<nome>", confidence: 82.31 }
+      - { status: "desconhecido", aluno: None, confidence: 34.12 }
+      - { status: "erro", message: "..." }
+    """
     try:
-        data = request.get_json()
-
+        data = request.get_json(silent=True)
         if not data or "image_data" not in data:
             return jsonify({"status": "erro", "message": "Imagem não recebida"}), 400
 
-        # ====== 1. Decodificar Base64 ======
-        image_data = data["image_data"].split(",")[-1]
+        # 1) extrai base64 (suporta 'data:image/...;base64,xxxx' ou só o base64)
+        raw = data["image_data"]
+        if isinstance(raw, dict):
+            # segurança: algumas vezes front manda JSON mal formado
+            return jsonify({"status": "erro", "message": "Formato de image_data inválido"}), 400
+
+        if ',' in raw:
+            image_base64 = raw.split(',', 1)[1]
+        else:
+            image_base64 = raw
+
+        # 2) decode base64
         try:
-            img_bytes = base64.b64decode(image_data)
+            image_bytes = base64.b64decode(image_base64)
         except Exception:
             return jsonify({"status": "erro", "message": "Base64 inválido"}), 400
 
-        img_array = np.frombuffer(img_bytes, np.uint8)
-        frame = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+        # 3) converte para imagem OpenCV (BGR)
+        np_arr = np.frombuffer(image_bytes, np.uint8)
+        frame_bgr = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        if frame_bgr is None:
+            return jsonify({"status": "erro", "message": "Falha ao decodificar imagem (cv2)"}), 400
 
-        if frame is None:
-            return jsonify({"status": "erro", "message": "Falha ao decodificar imagem"}), 400
+        # 4) DeepFace espera RGB - converte
+        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
 
-        # ====== 2. DeepFace.find ======
+        # 5) chama DeepFace.find (usa DB_PATH definido no arquivo)
         try:
             results = DeepFace.find(
-                img_path=frame,
-                db_path="imagens_conhecidas",
+                img_path=frame_rgb,
+                db_path=DB_PATH,
                 model_name="VGG-Face",
-                enforce_detection=False,
+                enforce_detection=DEEPFACE_ENFORCE_DETECTION,
+                detector_backend="retinaface",
                 silent=True
             )
         except Exception as e:
-            return jsonify({"status": "erro", "message": str(e)}), 500
+            return jsonify({"status": "erro", "message": f"DeepFace erro: {e}"}), 500
 
-        # ====== 3. Verifica resultados ======
-        if results is None or len(results) == 0 or results[0].empty:
-            return jsonify({
-                "status": "nao_identificado",
-                "nome": None,
-                "confidence": 0
-            })
+        # 6) checa resultados
+        if not results or len(results) == 0 or results[0].empty:
+            return jsonify({"status": "desconhecido", "aluno": None, "confidence": 0}), 200
 
-        df = results[0]
+        df = results[0].copy()
 
-        # garante que existam todas as colunas necessárias
-        required_columns = ["identity", "distance"]
-        for col in required_columns:
-            if col not in df.columns:
-                df[col] = None
+        # 7) tentar localizar a coluna de distância (padrões variados)
+        distance_col = None
+        for col in df.columns:
+            name = col.lower()
+            if name == "distance" or "distance" in name:
+                distance_col = col
+                break
+            if name.endswith("_cosine") or "cosine" in name:
+                distance_col = col
+                break
+            if name.endswith("_euclidean") or "euclidean" in name:
+                distance_col = col
+                break
 
-        # remove linhas vazias ou com valores None na coluna "distance"
-        df = df[df["distance"].notna()].reset_index(drop=True)
-        if df.empty:
-            return jsonify({
-                "status": "nao_identificado",
-                "nome": None,
-                "confidence": 0
-            })
+        # se não achar, falha graciosamente
+        if distance_col is None:
+            # tenta colunas comuns por índice
+            if "VGG-Face_cosine" in df.columns:
+                distance_col = "VGG-Face_cosine"
+            elif "cosine" in ",".join(df.columns):
+                # pega a primeira que contenha 'cosine'
+                for c in df.columns:
+                    if 'cosine' in c.lower():
+                        distance_col = c
+                        break
 
-        df = df.sort_values(by="distance", ascending=True).reset_index(drop=True)
+        if distance_col is None or df[distance_col].isna().all():
+            return jsonify({"status": "desconhecido", "aluno": None, "confidence": 0}), 200
+
+        # 8) pega melhor match (menor distância)
+        df = df[df[distance_col].notna()].sort_values(by=distance_col, ascending=True).reset_index(drop=True)
         best = df.iloc[0]
 
-        distance = float(best["distance"])
-        confidence = max(0, 100 - (distance * 100))
-        confidence = round(confidence, 2)
+        # 9) extrai identidade e nome (suporta identity = caminho/file)
+        identity = best.get("identity", None)
+        if identity and isinstance(identity, str):
+            # geralmente o identity é caminho/.../nome/arquivo.jpg
+            aluno_nome = os.path.basename(os.path.dirname(identity)) or os.path.splitext(os.path.basename(identity))[0]
+        else:
+            aluno_nome = None
 
-        # ====== 4. Nome ======
-        path = best["identity"]
-        nome = os.path.basename(os.path.dirname(path)) if path else None
-
-        # ====== 5. Verificação de confiança ======
-        LIMIAR = 50
-        if confidence < LIMIAR or not nome:
-            return jsonify({
-                "status": "nao_identificado",
-                "nome": None,
-                "confidence": confidence
-            })
-
-        # ====== 6. Registrar presença ======
-        conn = get_db_connection()
-        if not conn:
-            return jsonify({"status": "erro", "message": "Falha ao conectar ao banco"}), 500
-
+        # 10) calcula confiança: heurística usual (0..1 distance -> 0..100% confidence)
         try:
-            with conn, conn.cursor() as cur:
-                # pegar id do aluno
-                cur.execute("SELECT id FROM alunos WHERE nome = %s", (nome,))
-                aluno_row = cur.fetchone()
+            dist_val = float(best[distance_col])
+            confidence = max(0.0, 100.0 - (dist_val * 100.0))
+            confidence = round(confidence, 2)
+        except Exception:
+            confidence = None
 
-                if not aluno_row:
-                    return jsonify({
-                        "status": "nao_identificado",
-                        "nome": None,
-                        "confidence": confidence
-                    })
+        # 11) limiar mínimo para considerar reconhecido (ajuste se quiser)
+        LIMIAR = 50.0
+        if confidence is None or confidence < LIMIAR or not aluno_nome:
+            return jsonify({"status": "desconhecido", "aluno": None, "confidence": confidence or 0}), 200
 
-                aluno_id = aluno_row[0]
-
-                # verificar presença hoje
-                cur.execute("""
-                    SELECT id FROM presencas
-                    WHERE aluno_id = %s AND data_presenca = CURRENT_DATE
-                """, (aluno_id,))
-                existente = cur.fetchone()
-
-                if existente:
-                    # apaga (toggle)
-                    cur.execute("DELETE FROM presencas WHERE id = %s", (existente[0],))
-                    acao = "apagada"
-                else:
-                    # registra
-                    cur.execute("""
-                        INSERT INTO presencas (aluno_id, confianca)
-                        VALUES (%s, %s)
-                    """, (aluno_id, confidence))
-                    acao = "registrada"
-
+        # 12) registra presença usando sua função existente (toggle)
+        try:
+            registro = registrar_presenca(aluno_nome, confidence)
         except Exception as e:
-            return jsonify({"status": "erro", "message": f"Erro no banco: {e}"})
-        finally:
-            conn.close()
+            # se falhar ao gravar, não quebra o reconhecimento: avisa no retorno
+            return jsonify({"status": "erro", "message": f"Erro ao registrar presença: {e}"}), 500
 
-        # ====== 7. Retorno ======
+        # 13) resposta compatível com seu front
         return jsonify({
-            "status": "presente" if acao == "registrada" else "apagada",
-            "nome": nome,
+            "status": "ok",
+            "aluno": aluno_nome,
             "confidence": confidence
-        })
+        }), 200
 
     except Exception as e:
-        return jsonify({"status": "erro", "message": str(e)}), 500
-
-
+        return jsonify({"status": "erro", "message": f"Erro geral: {str(e)}"}), 500
 
 
 @app.route('/presencas')
