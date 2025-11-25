@@ -462,59 +462,7 @@ def chamada_webcam():
     except Exception as e:
         return jsonify({"status": "erro", "message": f"Erro geral: {str(e)}"}), 500
 
-# Rota alternativa /reconhecer que usa campo "imagem" (base64) — como você pediu antes
-@app.route('/reconhecer', methods=['POST'])
-def reconhecer():
-    try:
-        data = request.get_json(silent=True)
-        if not data or "imagem" not in data:
-            return jsonify({"status": "erro", "message": "JSON inválido"}), 400
 
-        raw = data["imagem"]
-        if isinstance(raw, dict):
-            return jsonify({"status": "erro", "message": "Formato inválido"}), 400
-        if ',' in raw:
-            image_base64 = raw.split(',', 1)[1]
-        else:
-            image_base64 = raw
-        try:
-            image_bytes = base64.b64decode(image_base64)
-        except Exception as e:
-            return jsonify({"status": "erro", "message": f"Erro ao decodificar imagem: {e}"}), 400
-
-        np_arr = np.frombuffer(image_bytes, np.uint8)
-        frame_bgr = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-        if frame_bgr is None:
-            return jsonify({"status": "erro", "message": "Falha ao decodificar imagem (cv2)"}), 400
-
-        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-        status, best, distance_col = deepface_find_on_frame(frame_rgb)
-        if status == "error":
-            return jsonify({"status": "erro", "message": f"DeepFace erro: {best}"}), 500
-        if status == "none":
-            return jsonify({"status": "nao_identificado", "nome": None, "confidence": 0}), 200
-
-        identity = best.get("identity") if isinstance(best.get("identity"), str) else None
-        nome = os.path.basename(os.path.dirname(identity)) if identity else None
-        try:
-            dist_val = float(best.get(distance_col))
-            confidence = round(max(0.0, 100.0 - (dist_val * 100.0)), 2)
-        except:
-            confidence = 0.0
-
-        if confidence < DEEPFACE_CONFIDENCE_THRESHOLD or not nome:
-            return jsonify({"status": "nao_identificado", "nome": None, "confidence": confidence}), 200
-
-        registro = registrar_presenca(nome, confidence)
-        if registro == "apagada":
-            return jsonify({"status": "apagada", "nome": nome, "confidence": confidence}), 200
-        elif registro is True:
-            return jsonify({"status": "presente", "nome": nome, "confidence": confidence}), 200
-        else:
-            return jsonify({"status": "erro", "message": "Falha ao registrar presença"}), 500
-
-    except Exception as e:
-        return jsonify({"status": "erro", "message": str(e)}), 500
 
 @app.route('/presencas')
 def ver_presencas():
@@ -559,74 +507,6 @@ def start_scheduler():
     sched.start()
     print(f"[SCHEDULER] Avisos diários agendados para {hour:02d}:{minute:02d} ({tzname})")
     
-@app.route('/reconhecer', methods=['POST'])
-def reconhecer_face():
-    try:
-        data = request.get_json(silent=True)
-        if not data or "imagem" not in data:
-            return jsonify({"status": "erro", "message": "JSON inválido"}), 400
-
-        raw = data["imagem"]
-
-        if isinstance(raw, dict):
-            return jsonify({"status": "erro", "message": "Formato inválido"}), 400
-
-        if ',' in raw:
-            image_base64 = raw.split(',', 1)[1]
-        else:
-            image_base64 = raw
-
-        try:
-            image_bytes = base64.b64decode(image_base64)
-        except Exception as e:
-            return jsonify({"status": "erro", "message": f"Erro ao decodificar imagem: {e}"}), 400
-
-        np_arr = np.frombuffer(image_bytes, np.uint8)
-        frame_bgr = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-
-        if frame_bgr is None:
-            return jsonify({"status": "erro", "message": "Falha ao decodificar via OpenCV"}), 400
-
-        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-
-        # DeepFace
-        status, best, distance_col = deepface_find_on_frame(frame_rgb)
-        if status == "error":
-            return jsonify({"status": "erro", "message": f"DeepFace erro: {best}"}), 500
-
-        if status == "none":
-            return jsonify({"status": "nao_identificado", "aluno": None, "confidence": 0}), 200
-
-        identity = best.get("identity") if isinstance(best.get("identity"), str) else None
-
-        aluno_nome = None
-        if identity:
-            aluno_nome = os.path.basename(os.path.dirname(identity))
-
-        # calcular confiança
-        try:
-            dist_val = float(best.get(distance_col))
-            confidence = max(0.0, 100.0 - (dist_val * 100.0))
-            confidence = round(confidence, 2)
-        except:
-            confidence = 0.0
-
-        LIMIAR = 50
-        if not aluno_nome or confidence < LIMIAR:
-            return jsonify({
-                "status": "nao_identificado",
-                "aluno": None,
-                "confidence": confidence
-            }), 200
-
-        return jsonify({
-            "status": "identificado",
-            "aluno": aluno_nome,
-            "confidence": confidence
-        }), 200
-
-    except Exception as e:
-        return jsonify({"status": "erro", "message": f"Erro geral: {e}"}), 500
 
 
 if __name__ == '__main__':
