@@ -400,67 +400,87 @@ def cadastrar_alunos():
 @app.route('/chamada_webcam', methods=['POST'])
 def chamada_webcam():
     try:
-        data = request.get_json(silent=True)
-        if not data or "image_data" not in data:
-            return jsonify({"status": "erro", "message": "Imagem não recebida"}), 400
+        data = request.get_json()
 
-        raw = data["image_data"]
-        if isinstance(raw, dict):
-            return jsonify({"status": "erro", "message": "Formato de image_data inválido"}), 400
-        if ',' in raw:
-            image_base64 = raw.split(',', 1)[1]
-        else:
-            image_base64 = raw
+        # Foto em Base64
+        imagem_base64 = data.get("image_data")
+        if not imagem_base64:
+            return jsonify({"status": "erro", "message": "Imagem não enviada"}), 400
 
-        try:
-            image_bytes = base64.b64decode(image_base64)
-        except Exception:
-            return jsonify({"status": "erro", "message": "Base64 inválido"}), 400
+        # Decodifica a imagem
+        imagem_bytes = base64.b64decode(imagem_base64.split(",")[1])
+        img = BytesIO(imagem_bytes)
 
-        np_arr = np.frombuffer(image_bytes, np.uint8)
-        frame_bgr = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
-        if frame_bgr is None:
-            return jsonify({"status": "erro", "message": "Falha ao decodificar imagem (cv2)"}), 400
+        # Usa o DeepFace para reconhecimento
+        resultado = DeepFace.find(
+            img_path=img,
+            db_path="faces_registradas",
+            enforce_detection=False
+        )
 
-        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+        # Se não encontrou ninguém
+        if resultado[0].empty:
+            return jsonify({"status": "erro", "message": "Rosto não reconhecido"}), 404
 
-        status, best, distance_col = deepface_find_on_frame(frame_rgb)
-        if status == "error":
-            return jsonify({"status": "erro", "message": f"DeepFace erro: {best}"}), 500
-        if status == "none":
-            return jsonify({"status": "nao_identificado", "aluno": None, "confidence": 0}), 200
+        # Pega o face_token do melhor match
+        face_token = resultado[0].iloc[0]["identity"].split("/")[-1].replace(".jpg", "")
 
-        identity = best.get("identity") if isinstance(best.get("identity"), str) else None
-        aluno_nome = None
-        if identity:
-            aluno_nome = os.path.basename(os.path.dirname(identity)) or os.path.splitext(os.path.basename(identity))[0]
+        # Agora buscamos o aluno correspondente no banco
+        conn = psycopg.connect(DB_CONFIG)
+        cur = conn.cursor()
 
-        try:
-            dist_val = float(best.get(distance_col))
-            confidence = max(0.0, 100.0 - (dist_val * 100.0))
-            confidence = round(confidence, 2)
-        except Exception:
-            confidence = 0.0
+        cur.execute("SELECT id FROM alunos WHERE face_token = %s", (face_token,))
+        row = cur.fetchone()
 
-        LIMIAR = 50.0
-        if confidence < LIMIAR or not aluno_nome:
-            return jsonify({"status": "nao_identificado", "aluno": None, "confidence": confidence}), 200
+        if not row:
+            return jsonify({"status": "erro", "message": "Aluno não encontrado"}), 404
+        
+        aluno_id = row[0]
 
-        try:
-            registro = registrar_presenca(aluno_nome, confidence)
-        except Exception as e:
-            return jsonify({"status": "erro", "message": f"Erro ao registrar presença: {e}"}), 500
+        # Data e hora atual
+        data_hoje = datetime.now().date()
+        hora_agora = datetime.now().time()
 
-        # Normaliza retorno para front
-        if registro == "apagada":
-            return jsonify({"status": "apagada", "nome": aluno_nome, "confidence": confidence}), 200
-        elif registro is True:
-            return jsonify({"status": "presente", "nome": aluno_nome, "confidence": confidence}), 200
-        else:
-            return jsonify({"status": "erro", "message": "Falha ao registrar presença"}), 500
+        # Verifica se já existe presença hoje
+        cur.execute("""
+            SELECT presente 
+            FROM presencas 
+            WHERE aluno_id = %s AND data_presenca = %s
+        """, (aluno_id, data_hoje))
+
+        registro = cur.fetchone()
+
+        # Se já existe → então ALTERA (remove presença)
+        if registro:
+            presente_atual = registro[0]
+            novo_status = not presente_atual   # inverte
+
+            cur.execute("""
+                UPDATE presencas
+                SET presente = %s, horario_presenca = %s
+                WHERE aluno_id = %s AND data_presenca = %s
+            """, (novo_status, hora_agora, aluno_id, data_hoje))
+
+            conn.commit()
+
+            if novo_status:
+                return jsonify({"status": "ok", "message": "Presença marcada"})
+            else:
+                return jsonify({"status": "ok", "message": "Presença removida"})
+
+        # Se não tem presença → cria nova
+        cur.execute("""
+            INSERT INTO presencas (aluno_id, data_presenca, horario_presenca, presente, confianca)
+            VALUES (%s, %s, %s, %s, %s)
+        """, (aluno_id, data_hoje, hora_agora, True, 0.98))
+
+        conn.commit()
+
+        return jsonify({"status": "ok", "message": "Presença registrada"})
 
     except Exception as e:
-        return jsonify({"status": "erro", "message": f"Erro geral: {str(e)}"}), 500
+        print("ERRO:", e)
+        return jsonify({"status": "erro", "message": "Falha ao registrar presença"})
 
 
 
