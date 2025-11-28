@@ -532,5 +532,5 @@ if __name__ == '__main__':
     print("🚀 Sistema iniciado (modo 100% local)!")
     print("- Interface: http://localhost:5000")
     print("- Admin: http://localhost:5000/admin")
-    print("- API: POST http://localhost:5000/chamada_webcam (ou /reconhecer com campo 'imagem')")
+    print("- API: POST http://localhost:5000/chamada_webcam ")
     app.run(host='0.0.0.0', port=5000, debug=False)
