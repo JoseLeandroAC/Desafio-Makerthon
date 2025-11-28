@@ -1,238 +1,131 @@
+<!-- É O COMEÇO DO SISTEMA, A PÁGINA INCIAL -->
+
 <!DOCTYPE html>
-<html lang="pt-br">
+<html lang="pt-BR">
 
 <head>
   <meta charset="UTF-8" />
-  <title>Registro de Presença</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Página Inicial</title>
   <style>
+    /* Fundo com gradiente */
     body {
-      background: #0d223a;
-      color: #fff;
-      font-family: system-ui, Segoe UI, Arial, sans-serif;
-      margin: 0
-    }
-
-    .wrap {
-      max-width: 980px;
-      margin: 40px auto;
-      padding: 0 16px
-    }
-
-    h1 {
-      font-weight: 700;
-      text-align: center;
-      margin-bottom: 20px
-    }
-
-    .card {
-      background: #0f2a4d;
-      border-radius: 16px;
-      padding: 16px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, .25)
-    }
-
-    #video {
-      width: 100%;
-      max-height: 520px;
-      border-radius: 12px;
-      background: #000;
-      object-fit: cover
-    }
-
-    .controls {
+      margin: 0;
+      height: 100vh;
       display: flex;
-      gap: 16px;
       justify-content: center;
-      margin: 18px 0
+      align-items: center;
+      background: linear-gradient(145deg, #061126, #02308a);
+      font-family: 'Poppins', sans-serif;
+      overflow: hidden;
     }
 
+    /* Animação de entrada */
+    @keyframes slideUpFade {
+      0% {
+        opacity: 0;
+        transform: translateY(40px);
+      }
+
+      100% {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    /* Estilo do botão */
     .btn {
-      background: #2b6cb0;
+      background-color: #3b72e9;
+      color: white;
       border: none;
-      color: #fff;
-      padding: 12px 18px;
-      border-radius: 10px;
-      font-weight: 600;
-      cursor: pointer
-    }
-
-    .btn:disabled {
-      opacity: .6;
-      cursor: not-allowed
-    }
-
-    #status {
-      margin-top: 8px;
-      text-align: center;
-      min-height: 24px
-    }
-
-    #status.error {
-      color: #ff6b6b
-    }
-
-    #status.ok {
-      color: #2fd57b
-    }
-
-    pre.log {
-      background: #061629;
-      color: #bfe1ff;
       border-radius: 12px;
-      padding: 12px;
-      white-space: pre-wrap
+      padding: 16px 32px;
+      font-size: 18px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    /* Container dos botões */
+    .btn-container {
+      position: fixed;
+      bottom: 40px;
+      right: 40px;
+      display: flex;
+      gap: 20px;
+      animation: slideUpFade 0.8s ease forwards;
+      opacity: 0;
+      animation-delay: 0.3s;
+    }
+
+    .btn a {
+      text-decoration: none;
+      color: white;
+    }
+
+    .btn:hover {
+      background-color: #1b6cef;
+      transform: translateY(-2px);
+      box-shadow: 0 6px 12px rgba(31, 115, 250, 0.3);
+    }
+
+    /* Ícone da seta */
+    .btn svg {
+      width: 18px;
+      height: 18px;
+      fill: white;
+      transition: transform 0.3s ease;
+      transform: rotate(0deg);
+    }
+
+    .btn:hover svg {
+      transform: rotate(0deg) translateX(4px);
+    }
+
+
+    .logo-sesi {
+      position: absolute;
+      bottom: 38px;
+      left: 38px;
+      width: 120px;
+    }
+
+    .img {
+      width: 50%;
     }
   </style>
 </head>
 
 <body>
-  <div class="wrap">
-    <h1>Registro de Presença</h1>
-    <div class="card">
-      <video id="video" autoplay playsinline></video>
+  <img src="imagens/logoo.png" class="img" alt="LOGO">
+  <img src="imagens/sesi.png" class="logo-sesi" alt="SESI">
 
-      <div class="controls">
-        <button id="btn-chamada" class="btn">Fazer Chamada</button>
-        <button id="register-button" class="btn">Cadastrar Alunos</button>
-        <a class="btn" href="/admin">Painel Admin</a>
-      </div>
+  <div class="btn-container">
+    <button class="btn">
+      <a href="index.html">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+          <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z" />
+        </svg>
+        REGISTRE-SE
+      </a>
+    </button>
 
-      <div id="status"></div>
-      <pre class="log" id="log"></pre>
-      <canvas id="canvas" style="display:none;"></canvas>
-    </div>
+    <button class="btn">
+      <a href="Página_admin.html">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+          <path d="M12 4l-1.41 1.41L16.17 11H4v2h12.17l-5.58 5.59L12 20l8-8z" />
+        </svg>
+        ADMINISTRAÇÃO
+      </a>
+    </button>
   </div>
 
-  <script>
-    const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
-    const btnChamada = document.getElementById('btn-chamada');
-    const btnRegistrar = document.getElementById('register-button');
-    const statusBox = document.getElementById('status');
-    const logBox = document.getElementById('log');
+  </button>
+  </div>
 
-    function setStatus(msg, ok = false) {
-      statusBox.textContent = msg;
-      statusBox.className = ok ? 'ok' : 'error';
-    }
-
-    function setLog(obj) {
-      if (!obj) { logBox.textContent = ''; return; }
-      try { logBox.textContent = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2); }
-      catch { logBox.textContent = String(obj); }
-    }
-
-    async function startCamera() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user" },
-          audio: false
-        });
-        video.srcObject = stream;
-      } catch (e) {
-        setStatus('Permita acesso à câmera no navegador.', false);
-        setLog(e);
-      }
-    }
-
-    function captureFrame() {
-      const w = video.videoWidth || 1280;
-      const h = video.videoHeight || 720;
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0, w, h);
-      return canvas.toDataURL('image/jpeg', 0.92);
-    }
-
-    async function fazerChamada() {
-      btnChamada.disabled = true;
-      btnRegistrar.disabled = true;
-      setStatus('Processando...', true);
-      setLog('');
-
-      try {
-        const dataURL = captureFrame();
-        const resp = await fetch('/chamada_webcam', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image_data: dataURL })
-        });
-
-        const data = await resp.json().catch(() => ({}));
-
-        if (!resp.ok) {
-          setStatus('Erro no servidor.', false);
-          setLog(data);
-          return;
-        }
-
-        if (data.status === 'presente') {
-          setStatus(`🎉 Identificado: ${data.nome} (confiança ${Math.round(data.confidence)}%)`, true);
-          setLog(data);
-        }
-        else if (data.status === 'apagada') {
-          setStatus(`⚠️ Presença removida de ${data.nome}`, false);
-          setLog(data);
-        }
-        else if (data.status === 'nao_identificado') {
-          setStatus('⚠️ Rosto não reconhecido.', false);
-          setLog(data);
-        }
-        else if (data.status === 'erro') {
-          setStatus(`❌ Erro: ${data.message || "Falha no reconhecimento"}`, false);
-          setLog(data);
-        }
-        else {
-          setStatus('Resposta inesperada.', false);
-          setLog(data);
-        }
-
-
-
-      } catch (e) {
-        setStatus('Falha na requisição.', false);
-        setLog(e);
-      } finally {
-        btnChamada.disabled = false;
-        btnRegistrar.disabled = false;
-      }
-    }
-
-    async function cadastrarAlunos() {
-      btnRegistrar.disabled = true;
-      btnChamada.disabled = true;
-      setStatus('Cadastrando alunos...', true);
-      setLog('');
-
-      try {
-        const resp = await fetch('/cadastrar_alunos');
-        const data = await resp.json().catch(() => ({}));
-
-        if (!resp.ok) {
-          setStatus('Erro ao cadastrar alunos.', false);
-          setLog(data);
-          return;
-        }
-
-        setStatus(data.message || 'Cadastro concluído.', true);
-        setLog(data.log || data);
-
-      } catch (e) {
-        setStatus('Falha na requisição.', false);
-        setLog(e);
-      } finally {
-        btnRegistrar.disabled = false;
-        btnChamada.disabled = false;
-      }
-    }
-
-    btnChamada.addEventListener('click', fazerChamada);
-    btnRegistrar.addEventListener('click', cadastrarAlunos);
-
-    startCamera();
-  </script>
 
 </body>
 
