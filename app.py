@@ -1,5 +1,3 @@
-
-
 import os
 import json
 import base64
@@ -11,7 +9,7 @@ from io import BytesIO
 from dotenv import load_dotenv
 from shutil import copy2, rmtree
 from pathlib import Path
-import pandas as pd  # só para conveniência, evitamos atribuições perigosas
+import pandas as pd # Importado para compatibilidade do DeepFace
 
 # DeepFace local
 from deepface import DeepFace
@@ -24,6 +22,7 @@ try:
     from pytz import timezone
 except Exception:
     BackgroundScheduler = None
+    timezone = None
 
 # módulo de envio (se existir)
 try:
@@ -36,7 +35,7 @@ load_dotenv()
 # Arquivos / pastas
 ARQUIVO_MAPA = "alunos_tokens.json"
 ARQUIVO_MAPA_BAK = "alunos_tokens.bak.json"
-PASTA_ALUNOS = "alunos"                 # pasta com fotos para cadastro (origem)
+PASTA_ALUNOS = "alunos"  # pasta com fotos para cadastro (origem)
 PASTA_IMAGENS_CONHECIDAS = "imagens_conhecidas"  # pasta usada pelo DeepFace (destino)
 os.makedirs(PASTA_ALUNOS, exist_ok=True)
 os.makedirs(PASTA_IMAGENS_CONHECIDAS, exist_ok=True)
@@ -44,7 +43,7 @@ os.makedirs(PASTA_IMAGENS_CONHECIDAS, exist_ok=True)
 # DB
 DB_CONFIG = {
     'host': os.getenv('DB_HOST', 'localhost'),
-    'dbname': os.getenv('DB_NAME', 'BancodadosOF'),
+    'dbname': os.getenv('DB_NAME', 'alunossesi'),
     'user': os.getenv('DB_USER', 'postgres'),
     'password': os.getenv('DB_PASSWORD', '123456'),
     'port': int(os.getenv('DB_PORT', 5432))
@@ -59,12 +58,15 @@ alunos_tokens = {}  # map face_token/path -> nome (opcional, mantido para compat
 # Configurações DeepFace via variáveis de ambiente
 DEEPFACE_ENFORCE_DETECTION = os.getenv("DEEPFACE_ENFORCE_DETECTION", "True").lower() in ("1", "true", "yes")
 try:
-    DEEPFACE_CONFIDENCE_THRESHOLD = float(os.getenv("DEEPFACE_CONFIDENCE_THRESHOLD", "80"))
+    DEEPFACE_CONFIDENCE_THRESHOLD = float(os.getenv("DEEPFACE_CONFIDENCE_THRESHOLD", "60"))
 except Exception:
-    DEEPFACE_CONFIDENCE_THRESHOLD = 80.0
+    DEEPFACE_CONFIDENCE_THRESHOLD = 60.0
 
 # ---------------- Helpers ----------------
 def salvar_tokens():
+    if os.path.exists(ARQUIVO_MAPA):
+        # Cria backup antes de sobrescrever
+        copy2(ARQUIVO_MAPA, ARQUIVO_MAPA_BAK)
     with open(ARQUIVO_MAPA, "w", encoding="utf-8") as f:
         json.dump(alunos_tokens, f, ensure_ascii=False)
 
@@ -72,30 +74,17 @@ def carregar_tokens():
     global alunos_tokens
     if os.path.exists(ARQUIVO_MAPA):
         try:
-            if os.path.getsize(ARQUIVO_MAPA) == 0:
-                if os.path.exists(ARQUIVO_MAPA_BAK):
-                    try:
-                        with open(ARQUIVO_MAPA_BAK, "r", encoding="utf-8-sig") as f:
-                            alunos_tokens = json.load(f) or {}
-                    except Exception as e:
-                        print(f"Falha ao carregar backup {ARQUIVO_MAPA_BAK}: {e}. Usando dicionário vazio.")
-                        alunos_tokens = {}
-                else:
-                    alunos_tokens = {}
+            if os.path.getsize(ARQUIVO_MAPA) == 0 and os.path.exists(ARQUIVO_MAPA_BAK):
+                # Tenta backup se o principal estiver vazio
+                with open(ARQUIVO_MAPA_BAK, "r", encoding="utf-8-sig") as f:
+                    alunos_tokens = json.load(f) or {}
                 return
+                
             with open(ARQUIVO_MAPA, "r", encoding="utf-8-sig") as f:
                 alunos_tokens = json.load(f) or {}
-        except (json.JSONDecodeError, ValueError):
-            print(f"Aviso: arquivo {ARQUIVO_MAPA} corrompido. Tentando fallback {ARQUIVO_MAPA_BAK}.")
-            if os.path.exists(ARQUIVO_MAPA_BAK):
-                try:
-                    with open(ARQUIVO_MAPA_BAK, "r", encoding="utf-8-sig") as f:
-                        alunos_tokens = json.load(f) or {}
-                except Exception as e:
-                    print(f"Falha ao carregar backup {ARQUIVO_MAPA_BAK}: {e}. Usando dicionário vazio.")
-                    alunos_tokens = {}
-            else:
-                alunos_tokens = {}
+        except (json.JSONDecodeError, ValueError) as e:
+            print(f"Aviso: arquivo {ARQUIVO_MAPA} corrompido ou erro de carregamento: {e}. Usando vazio.")
+            alunos_tokens = {}
         except Exception as e:
             print(f"Erro ao carregar tokens: {e}")
             alunos_tokens = {}
@@ -114,6 +103,7 @@ def init_database():
     if conn:
         try:
             with conn, conn.cursor() as cur:
+                # Tabela alunos
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS alunos (
                         id SERIAL PRIMARY KEY,
@@ -124,6 +114,8 @@ def init_database():
                     );
                 """)
                 cur.execute("ALTER TABLE alunos ADD COLUMN IF NOT EXISTS email_responsavel TEXT;")
+
+                # Tabela presencas
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS presencas (
                         id SERIAL PRIMARY KEY,
@@ -142,38 +134,54 @@ def init_database():
 
 def registrar_presenca(nome_aluno, confianca):
     """
-    Toggle: se já tem presença hoje -> apaga (retorna "apagada")
-            se não tem -> insere (retorna True)
-            se falha -> False
+    CORREÇÃO DE DB: Busca o ID do aluno primeiro e usa para DELETE/INSERT.
+    Toggle:
+        - Se já tem presença hoje -> apaga (retorna "apagada")
+        - Se não tem -> insere (retorna True)
+        - Se falha -> False
     """
     conn = get_db_connection()
     if conn:
         try:
             with conn, conn.cursor() as cur:
-                cur.execute("""
-                    SELECT p.id FROM presencas p
-                    JOIN alunos a ON p.aluno_id = a.id
-                    WHERE a.nome = %s AND p.data_presenca = CURRENT_DATE
-                """, (nome_aluno,))
-                row = cur.fetchone()
-                if row:
-                    cur.execute("DELETE FROM presencas WHERE id = %s", (row[0],))
-                    return "apagada"
-                cur.execute("""
-                    INSERT INTO presencas (aluno_id, presente, confianca)
-                    SELECT id, TRUE, %s FROM alunos WHERE nome = %s
-                """, (confianca, nome_aluno))
-                if cur.rowcount == 0:
+                # 1. Obter o ID do aluno
+                cur.execute("SELECT id FROM alunos WHERE nome = %s", (nome_aluno,))
+                aluno_row = cur.fetchone()
+                if not aluno_row:
+                    print(f"Aviso: Aluno '{nome_aluno}' não encontrado no DB para registro.")
                     return False
+
+                aluno_id = aluno_row[0]
+
+                # 2. Verificar se já existe presença hoje
+                cur.execute("""
+                    SELECT id FROM presencas
+                    WHERE aluno_id = %s AND data_presenca = CURRENT_DATE
+                """, (aluno_id,))
+                row = cur.fetchone()
+
+                if row:
+                    # Se já tem presença hoje -> apaga
+                    presenca_id = row[0]
+                    cur.execute("DELETE FROM presencas WHERE id = %s", (presenca_id,))
+                    return "apagada"
+
+                # 3. Se não existe presença, insere nova entrada
+                cur.execute("""
+                    INSERT INTO presencas (aluno_id, data_presenca, confianca)
+                    VALUES (%s, CURRENT_DATE, %s)
+                """, (aluno_id, confianca))
+                
                 return True
+
         except Exception as e:
-            print(f"Erro ao registrar presença: {e}")
+            print("Erro registrar_presenca:", e)
             return False
-        finally:
-            conn.close()
+
     return False
 
-# ---------------- Util DeepFace local ----------------
+
+# ---------------- Util DeepFace local (Baseado na Versão B) ----------------
 DB_PATH = PASTA_IMAGENS_CONHECIDAS
 
 def deepface_find_on_frame(frame_rgb):
@@ -201,28 +209,12 @@ def deepface_find_on_frame(frame_rgb):
 
     # localizar coluna de distância de forma robusta
     distance_col = None
-    cols_lower = [c.lower() for c in df.columns]
-    for i, c in enumerate(df.columns):
+    for c in df.columns:
         name = c.lower()
-        if name == "distance" or "distance" in name:
-            distance_col = c
-            break
-        if "cosine" in name or "euclidean" in name:
+        if name in ["distance", "vgg-face_cosine"] or "cosine" in name or "euclidean" in name:
             distance_col = c
             break
 
-    # fallbacks
-    if distance_col is None:
-        # tenta padrões comuns
-        if "vgg-face_cosine" in df.columns:
-            distance_col = "VGG-Face_cosine"
-        else:
-            for c in df.columns:
-                if "cosine" in c.lower():
-                    distance_col = c
-                    break
-
-    # se não há coluna de distância usável -> devolve none
     if distance_col is None or df[distance_col].isna().all():
         return ("none", None, None)
 
@@ -240,6 +232,7 @@ def distance_to_confidence(distance):
     if distance is None:
         return 0.0
     try:
+        # Padrão: 1 - distance * 100
         conf = 100.0 - (float(distance) * 100.0)
         conf = max(0.0, min(100.0, conf))
         return round(conf, 2)
@@ -329,6 +322,9 @@ def atualizar_email_responsavel(aluno_id):
         conn.close()
     return redirect(url_for("admin_panel"))
 
+
+#aqui é onde elecadastra os alunos.
+
 @app.route('/cadastrar_alunos', methods=['GET'])
 def cadastrar_alunos():
     carregar_tokens()
@@ -339,33 +335,42 @@ def cadastrar_alunos():
     if not arquivos:
         return jsonify({"status": "warning", "message": "⚠️ Nenhuma foto encontrada na pasta 'alunos'."}), 200
     log_messages = []
+    #pega os arquivos da pasta alunos e verifica se exitem
+    
     for foto in arquivos:
         nome = os.path.splitext(foto)[0]
         caminho_origem = os.path.join(pasta, foto)
         destino_dir = os.path.join(PASTA_IMAGENS_CONHECIDAS, nome)
         os.makedirs(destino_dir, exist_ok=True)
         destino_path = os.path.join(destino_dir, foto)
+        #pega cada arquivo e copia para a pasta imagens_conhecidas/nome_do_aluno/foto.jpg
+        
         try:
             copy2(caminho_origem, destino_path)
         except Exception as e:
             log_messages.append(f"❌ Erro ao copiar {foto}: {e}")
             continue
+        
         face_token = os.path.relpath(destino_path, start=os.path.dirname(__file__))
         conn = get_db_connection()
+        
         if not conn:
             log_messages.append(f"❌ Erro de conexão ao salvar {nome}.")
             continue
+        #tenta salvar no banco
         try:
             with conn, conn.cursor() as cur:
+                # 1. Tenta encontrar pelo nome
                 cur.execute("SELECT id FROM alunos WHERE nome = %s", (nome,))
                 existe = cur.fetchone()
+                
                 if existe:
-                    # Já existe aluno → apenas atualizar face_token
+                    # Aluno existe → apenas atualizar face_token
                     cur.execute("""
                         UPDATE alunos 
                         SET face_token = %s 
-                        WHERE nome = %s
-                    """, (face_token, nome))
+                        WHERE id = %s
+                    """, (face_token, existe[0]))
                     log_messages.append(f"🔄 Aluno '{nome}' atualizado com novo face_token.")
                 else:
                     # Não existe → criar novo aluno
@@ -375,9 +380,9 @@ def cadastrar_alunos():
                         RETURNING id
                     """, (nome, face_token))
                     log_messages.append(f"✅ Aluno '{nome}' cadastrado com sucesso!")
-
+                
                 conn.commit()
-
+        
         except Exception as e:
             log_messages.append(f"❌ Erro ao salvar '{nome}' no banco: {e}")
         finally:
@@ -400,89 +405,77 @@ def cadastrar_alunos():
 @app.route('/chamada_webcam', methods=['POST'])
 def chamada_webcam():
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True)
+        if not data or "image_data" not in data:
+            return jsonify({"status": "erro", "message": "Imagem não recebida"}), 400
 
-        # Foto em Base64
-        imagem_base64 = data.get("image_data")
-        if not imagem_base64:
-            return jsonify({"status": "erro", "message": "Imagem não enviada"}), 400
-
-        # Decodifica a imagem
-        imagem_bytes = base64.b64decode(imagem_base64.split(",")[1])
-        img = BytesIO(imagem_bytes)
-
-        # Usa o DeepFace para reconhecimento
-        resultado = DeepFace.find(
-            img_path=img,
-            db_path="faces_registradas",
-            enforce_detection=False
-        )
-
-        # Se não encontrou ninguém
-        if resultado[0].empty:
-            return jsonify({"status": "erro", "message": "Rosto não reconhecido"}), 404
-
-        # Pega o face_token do melhor match
-        face_token = resultado[0].iloc[0]["identity"].split("/")[-1].replace(".jpg", "")
-
-        # Agora buscamos o aluno correspondente no banco
-        conn = psycopg.connect(DB_CONFIG)
-        cur = conn.cursor()
-
-        cur.execute("SELECT id FROM alunos WHERE face_token = %s", (face_token,))
-        row = cur.fetchone()
-
-        if not row:
-            return jsonify({"status": "erro", "message": "Aluno não encontrado"}), 404
+        raw = data["image_data"]
         
-        aluno_id = row[0]
+        # Trata prefixo data:image/jpeg;base64,
+        if isinstance(raw, str) and ',' in raw:
+            image_base64 = raw.split(',', 1)[1]
+        else:
+            image_base64 = raw
 
-        # Data e hora atual
-        data_hoje = datetime.now().date()
-        hora_agora = datetime.now().time()
+        try:
+            image_bytes = base64.b64decode(image_base64)
+        except Exception:
+            return jsonify({"status": "erro", "message": "Base64 inválido"}), 400
 
-        # Verifica se já existe presença hoje
-        cur.execute("""
-            SELECT presente 
-            FROM presencas 
-            WHERE aluno_id = %s AND data_presenca = %s
-        """, (aluno_id, data_hoje))
+        np_arr = np.frombuffer(image_bytes, np.uint8)
+        frame_bgr = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
+        if frame_bgr is None:
+            return jsonify({"status": "erro", "message": "Falha ao decodificar imagem (cv2)"}), 400
 
-        registro = cur.fetchone()
+        frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
 
-        # Se já existe → então ALTERA (remove presença)
-        if registro:
-            presente_atual = registro[0]
-            novo_status = not presente_atual   # inverte
+        status, best, distance_col = deepface_find_on_frame(frame_rgb)
+        
+        if status == "error":
+            return jsonify({"status": "erro", "message": f"DeepFace erro: {best}"}), 500
+        if status == "none":
+            return jsonify({"status": "nao_identificado", "aluno": None, "confidence": 0}), 200
 
-            cur.execute("""
-                UPDATE presencas
-                SET presente = %s, horario_presenca = %s
-                WHERE aluno_id = %s AND data_presenca = %s
-            """, (novo_status, hora_agora, aluno_id, data_hoje))
+        identity = best.get("identity") if isinstance(best.get("identity"), str) else None
+        aluno_nome = None
+        if identity:
+            # Pega o nome da subpasta (esperado que seja o nome do aluno)
+            aluno_nome = os.path.basename(os.path.dirname(identity))
 
-            conn.commit()
+        try:
+            dist_val = float(best.get(distance_col))
+            # Converte distância (0=melhor) para confiança (100=melhor)
+            confidence = distance_to_confidence(dist_val)
+        except Exception:
+            confidence = 0.0
 
-            if novo_status:
-                return jsonify({"status": "ok", "message": "Presença marcada"})
-            else:
-                return jsonify({"status": "ok", "message": "Presença removida"})
+        # Usa o limite de confiança configurado
+        if confidence < DEEPFACE_CONFIDENCE_THRESHOLD or not aluno_nome:
+            return jsonify({"status": "nao_identificado", "aluno": None, "confidence": confidence}), 200
 
-        # Se não tem presença → cria nova
-        cur.execute("""
-            INSERT INTO presencas (aluno_id, data_presenca, horario_presenca, presente, confianca)
-            VALUES (%s, %s, %s, %s, %s)
-        """, (aluno_id, data_hoje, hora_agora, True, 0.98))
+        try:
+            # Chama a função de registro **corrigida**
+            registro = registrar_presenca(aluno_nome, confidence)
+        except Exception as e:
+            return jsonify({"status": "erro", "message": f"Erro ao registrar presença: {e}"}), 500
 
-        conn.commit()
-
-        return jsonify({"status": "ok", "message": "Presença registrada"})
+        # Normaliza retorno para front
+        if registro == "apagada":
+            return jsonify({"status": "apagada", "nome": aluno_nome, "confidence": confidence}), 200
+        elif registro is True:
+            return jsonify({"status": "presente", "nome": aluno_nome, "confidence": confidence}), 200
+        else:
+            # Falha no DB (ex: aluno_nome não encontrado, mas não deveria acontecer se o DeepFace achou)
+            return jsonify({"status": "erro", "message": "Falha ao registrar presença (DB)"}), 500
 
     except Exception as e:
-        print("ERRO:", e)
-        return jsonify({"status": "erro", "message": "Falha ao registrar presença"})
+        return jsonify({"status": "erro", "message": f"Erro geral: {str(e)}"}), 500
 
-
+# Rota alternativa /reconhecer (compatibilidade)
+@app.route('/reconhecer', methods=['POST'])
+def reconhecer():
+    # Esta rota é idêntica à chamada_webcam no fluxo de reconhecimento/registro
+    return chamada_webcam()
 
 @app.route('/presencas')
 def ver_presencas():
@@ -516,24 +509,26 @@ def ver_presencas():
 
 # Scheduler (opcional)
 def start_scheduler():
-    if not email_ausentes or BackgroundScheduler is None:
+    if not email_ausentes or BackgroundScheduler is None or timezone is None:
         return
     tzname = os.getenv("TIMEZONE", "America/Sao_Paulo")
-    tz = timezone(tzname)
-    hour = int(os.getenv("EMAIL_SCHEDULE_HOUR", "18"))
-    minute = int(os.getenv("EMAIL_SCHEDULE_MINUTE", "0"))
-    sched = BackgroundScheduler(timezone=tz)
-    sched.add_job(email_ausentes.main, "cron", hour=hour, minute=minute, id="avisos_diarios")
-    sched.start()
-    print(f"[SCHEDULER] Avisos diários agendados para {hour:02d}:{minute:02d} ({tzname})")
-    
-
+    try:
+        tz = timezone(tzname)
+        hour = int(os.getenv("EMAIL_SCHEDULE_HOUR", "18"))
+        minute = int(os.getenv("EMAIL_SCHEDULE_MINUTE", "0"))
+        sched = BackgroundScheduler(timezone=tz)
+        sched.add_job(email_ausentes.main, "cron", hour=hour, minute=minute, id="avisos_diarios")
+        sched.start()
+        print(f"[SCHEDULER] Avisos diários agendados para {hour:02d}:{minute:02d} ({tzname})")
+    except Exception as e:
+        print(f"[SCHEDULER] Erro ao iniciar agendador: {e}")
 
 if __name__ == '__main__':
     init_database()
     # garante pastas
     os.makedirs(PASTA_ALUNOS, exist_ok=True)
     os.makedirs(PASTA_IMAGENS_CONHECIDAS, exist_ok=True)
+    # start_scheduler() # Descomente para iniciar o agendador
     print("🚀 Sistema iniciado (modo 100% local)!")
     print("- Interface: http://localhost:5000")
     print("- Admin: http://localhost:5000/admin")
