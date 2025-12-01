@@ -6,30 +6,32 @@
   <title>Registro de Presença</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <style>
-    body {
+     body {
       background: #0d223a;
       color: #fff;
-      font-family: system-ui, Segoe UI, Arial, sans-serif;
-      margin: 0
+      font-family: Arial, Helvetica, sans-serif;
+      margin: 0;
     }
 
     .wrap {
       max-width: 980px;
       margin: 40px auto;
-      padding: 0 16px
+      padding: 0 16px;
     }
 
+
     h1 {
-      font-weight: 700;
+      font-weight: 600;
       text-align: center;
-      margin-bottom: 20px
+      margin-bottom: 20px;
+      letter-spacing: 0.5px;
     }
 
     .card {
       background: #0f2a4d;
       border-radius: 16px;
       padding: 16px;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, .25)
+      box-shadow: 0 8px 24px rgba(0, 0, 0, .25);
     }
 
     #video {
@@ -37,43 +39,76 @@
       max-height: 520px;
       border-radius: 12px;
       background: #000;
-      object-fit: cover
+      object-fit: cover;
+      aspect-ratio: 16/9;
+      display: block;
     }
+
+
 
     .controls {
       display: flex;
-      gap: 16px;
+      gap: 10px;
       justify-content: center;
-      margin: 18px 0
+      margin: 20px 0;
+      flex-wrap: wrap;
     }
 
     .btn {
       background: #2b6cb0;
       border: none;
       color: #fff;
-      padding: 12px 18px;
-      border-radius: 10px;
-      font-weight: 600;
-      cursor: pointer
+      padding: 12px 19.5px;
+      border-radius: 8px;
+      font-weight: 700;
+      font-size: 1.50rem;
+      cursor: pointer;
+      transition: transform .15s ease, box-shadow .15s ease, background .15s ease, opacity .15s ease;
+      box-shadow: 0 10px 16px rgba(37, 99, 235, 0.3);
+      text-decoration: none;
+      text-align: center;
+      min-width: 150px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
     }
 
     .btn:disabled {
-      opacity: .6;
+      opacity: 0.7;
       cursor: not-allowed
+    }
+
+    .btn:hover {
+      background: #002ca4;
+      transform: translateY(-2px);
+      box-shadow: 0 6px 14px rgba(37, 99, 235, 0.4);
+
+    }
+
+    .btn:focus-visible {
+      outline: 2px solid var(--ring);
+      outline-offset: 2px;
+    }
+
+    .btn:active {
+      transform: scale(0.98);
     }
 
     #status {
       margin-top: 8px;
       text-align: center;
-      min-height: 24px
+      min-height: 24px;
+      font-size: 0.95rem;
+      font-weight: 600;
     }
 
     #status.error {
-      color: #ff6b6b
+      color: #ff1b1b
     }
 
     #status.ok {
-      color: #2fd57b
+      color: #019a46
     }
 
     pre.log {
@@ -81,157 +116,123 @@
       color: #bfe1ff;
       border-radius: 12px;
       padding: 12px;
-      white-space: pre-wrap
+      white-space: pre-wrap;
+      text-align: left;
+      border: 1px solid rgba(255, 255, 255, .06);
     }
   </style>
 </head>
 
 <body>
   <div class="wrap">
-    <h1>Registro de Presença</h1>
-    <div class="card">
-      <video id="video" autoplay playsinline></video>
-
-      <div class="controls">
-        <button id="btn-chamada" class="btn">Fazer Chamada</button>
-        <button id="register-button" class="btn">Cadastrar Alunos</button>
-        <a class="btn" href="/admin">Painel Admin</a>
-      </div>
-
-      <div id="status"></div>
-      <pre class="log" id="log"></pre>
-      <canvas id="canvas" style="display:none;"></canvas>
+  <h1 id="register-button">Registro de Presença</h1> <div class="card">
+    <video id="video" autoplay playsinline></video>
+    <div class="controls">
+      <button id="btn-chamada" class="btn">Fazer Chamada</button>
     </div>
+    <div id="status"></div>
+    <pre class="log" id="log"></pre>
+    <canvas id="canvas" style="display:none;"></canvas>
   </div>
+</div>
 
-  <script>
-    const video = document.getElementById('video');
-    const canvas = document.getElementById('canvas');
-    const btnChamada = document.getElementById('btn-chamada');
-    const btnRegistrar = document.getElementById('register-button');
-    const statusBox = document.getElementById('status');
-    const logBox = document.getElementById('log');
+ <script>
+    const video = document.getElementById('video');
+    const canvas = document.getElementById('canvas');
+    const btnChamada = document.getElementById('btn-chamada');
+    // const btnRegistrar = document.getElementById('register-button'); // <-- REMOVER! ID está no H1
+    const statusBox = document.getElementById('status');
+    const logBox = document.getElementById('log');
 
-    function setStatus(msg, ok = false) {
-      statusBox.textContent = msg;
-      statusBox.className = ok ? 'ok' : 'error';
-    }
+    function setStatus(msg, ok = false) {
+      statusBox.textContent = msg;
+      statusBox.className = ok ? 'ok' : 'error';
+    }
+    function setLog(obj) {
+      if (!obj) { logBox.textContent = ''; return; }
+      try { logBox.textContent = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2); }
+      catch { logBox.textContent = String(obj); }
+    }
 
-    function setLog(obj) {
-      if (!obj) { logBox.textContent = ''; return; }
-      try { logBox.textContent = typeof obj === 'string' ? obj : JSON.stringify(obj, null, 2); }
-      catch { logBox.textContent = String(obj); }
-    }
+    async function startCamera() {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "user" }, audio: false });
+        video.srcObject = stream;
+      } catch (e) {
+        setStatus('Permita acesso à câmera no navegador.', false);
+        setLog(e);
+      }
+    }
 
-    async function startCamera() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "user" },
-          audio: false
-        });
-        video.srcObject = stream;
-      } catch (e) {
-        setStatus('Permita acesso à câmera no navegador.', false);
-        setLog(e);
-      }
-    }
+    function captureFrame() {
+      const w = video.videoWidth || 1280;
+      const h = video.videoHeight || 720;
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext('2d');
+      ctx.drawImage(video, 0, 0, w, h);
+      return canvas.toDataURL('image/jpeg', 0.92);
+    }
 
-    function captureFrame() {
-      const w = video.videoWidth || 1280;
-      const h = video.videoHeight || 720;
-      canvas.width = w;
-      canvas.height = h;
-      const ctx = canvas.getContext('2d');
-      ctx.drawImage(video, 0, 0, w, h);
-      return canvas.toDataURL('image/jpeg', 0.92);
-    }
+    async function fazerChamada() {
+      btnChamada.disabled = true;
+      // btnRegistrar.disabled = true; // <-- REMOVER
+      setStatus('Processando...', true);
+      setLog('');
 
-    async function fazerChamada() {
-      btnChamada.disabled = true;
-      btnRegistrar.disabled = true;
-      setStatus('Processando...', true);
-      setLog('');
+      try {
+        const dataURL = captureFrame();
+        const resp = await fetch('/chamada_webcam', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image_data: dataURL })
+        });
 
-      try {
-        const dataURL = captureFrame();
-        const resp = await fetch('/chamada_webcam', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image_data: dataURL })
-        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok) {
+          setStatus('Erro no servidor:', false);
+          setLog(data);
+          return;
+        }
 
-        const data = await resp.json().catch(() => ({}));
+        if (data.status === 'presente') {
+          setStatus(`✅ Presença marcada: ${data.nome} (confiança ${Math.round(data.confidence)}).`, true);
+          setLog('');
+        } else if (data.status === 'apagada') {
+          setStatus(`⚠️ Presença removida (toggle) de ${data.nome}.`, true);
+          setLog('');
+        } else if (data.status === 'nao_identificado') {
+          setStatus('Rosto detectado, mas sem confiança suficiente.', false);
+          setLog(data);
+        } else if (data.status === 'nao_detectado') {
+          setStatus('Nenhum rosto detectado.', false);
+          setLog(data);
+        } else {
+          setStatus('Resposta inesperada do servidor.', false);
+          setLog(data);
+        }
+      } catch (e) {
+        setStatus('Falha na requisição.', false);
+        setLog(e);
+      } finally {
+        btnChamada.disabled = false;
+        // btnRegistrar.disabled = false; // <-- REMOVER
+      }
+    }
 
-        if (!resp.ok) {
-          setStatus('Erro no servidor.', false);
-          setLog(data);
-          return;
-        }
+    // Removemos a função cadastrarAlunos, pois o botão foi removido do HTML.
+    // async function cadastrarAlunos() { ... }
 
-        if (data.status === 'presente') {
-          setStatus(`🎉 Identificado: ${data.nome} (confiança ${Math.round(data.confidence)}%)`, true);
-          setLog(data);
-        }
-        else if (data.status === 'apagada') {
-          setStatus(`⚠️ Presença removida de ${data.nome}`, false);
-          setLog(data);
-        }
-        else if (data.status === 'nao_identificado') {
-          setStatus('⚠️ Rosto não reconhecido.', false);
-          setLog(data);
-        }
-        else if (data.status === 'erro') {
-          setStatus(`❌ Erro: ${data.message || "Falha no reconhecimento"}`, false);
-          setLog(data);
-        }
-        else {
-          setStatus('Resposta inesperada.', false);
-          setLog(data);
-        }
+    // btnChamada.addEventListener('click', fazerChamada);
+    // btnRegistrar.addEventListener('click', cadastrarAlunos);
 
+    // startCamera();
 
+    // Depois (Corrigido):
+    btnChamada.addEventListener('click', fazerChamada);
+    // btnRegistrar.addEventListener('click', cadastrarAlunos); // Não existe mais
 
-      } catch (e) {
-        setStatus('Falha na requisição.', false);
-        setLog(e);
-      } finally {
-        btnChamada.disabled = false;
-        btnRegistrar.disabled = false;
-      }
-    }
-
-    async function cadastrarAlunos() {
-      btnRegistrar.disabled = true;
-      btnChamada.disabled = true;
-      setStatus('Cadastrando alunos...', true);
-      setLog('');
-
-      try {
-        const resp = await fetch('/cadastrar_alunos');
-        const data = await resp.json().catch(() => ({}));
-
-        if (!resp.ok) {
-          setStatus('Erro ao cadastrar alunos.', false);
-          setLog(data);
-          return;
-        }
-
-        setStatus(data.message || 'Cadastro concluído.', true);
-        setLog(data.log || data);
-
-      } catch (e) {
-        setStatus('Falha na requisição.', false);
-        setLog(e);
-      } finally {
-        btnRegistrar.disabled = false;
-        btnChamada.disabled = false;
-      }
-    }
-
-    btnChamada.addEventListener('click', fazerChamada);
-    btnRegistrar.addEventListener('click', cadastrarAlunos);
-
-    startCamera();
+    startCamera();
   </script>
 
 </body>
