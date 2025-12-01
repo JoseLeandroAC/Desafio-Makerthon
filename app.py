@@ -253,6 +253,14 @@ def registro():
     """
     return render_template("Registro.html")
 
+@app.route('/entrar_admin')
+def entrar_admin():
+    """
+    Carrega o template da página de login administrativo.
+    OBS: O arquivo 'entrar_admin.html' deve estar na pasta 'templates'.
+    """
+    return render_template("entrar_admin.html")
+
 @app.route('/admin')
 def admin_panel():
     conn = get_db_connection()

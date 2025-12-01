@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Acesso Painel Admin</title>
+
+    <style>
+        /* Fundo gradiente */
+        body {
+            margin: 0;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            background: linear-gradient(to bottom, #04243f, #064875);
+            font-family: "Poppins", sans-serif;
+        }
+
+        /* Container geral */
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            gap: 30px;
+        }
+
+        h1 {
+            color: #ffffff;
+            margin: 0;
+        }
+
+        /* Caixa de login */
+        .login-box {
+            background: #0f4583;
+            border-radius: 20px;
+            padding: 60px 40px;
+            width: 420px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            box-shadow: 0 14px 24px rgba(0, 0, 0, 0.25);
+        }
+
+        .input {
+            width: 100%;
+            background: #0b6a9f;
+            border: none;
+            outline: none;
+            color: white;
+            font-size: 20px;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            transition: all 0.3s ease;
+        }
+
+        .input::placeholder {
+            color: #a9d6f5;
+        }
+
+        .input:focus {
+            background: #1181cc;
+            box-shadow: 0 0 10px rgba(17, 129, 204, 0.5);
+        }
+
+        /* Botão */
+        .btn {
+            width: 100%;
+            background: #0a84d8;
+            border: none;
+            color: white;
+            font-size: 20px;
+            font-weight: 650;
+            padding: 18px;
+            border-radius: 10px;
+            cursor: pointer;
+            transition: 0.3s;
+            margin-top: 8px;
+        }
+
+        .btn:hover {
+            background: #0c9ef2;
+            transform: scale(1.02);
+        }
+
+        /* Logo SESI */
+        .logo {
+            position: absolute;
+            bottom: 25px;
+            left: 30px;
+            width: 90px;
+        }
+
+        /* === MODAL === */
+        #loginModal {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.6);
+            justify-content: center;
+            align-items: center;
+            z-index: 999;
+        }
+
+        .modal-content {
+            background: #071629;
+            padding: 30px;
+            border-radius: 12px;
+            width: 320px;
+            color: #ecf0f1;
+            text-align: center;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+        }
+
+        .modal-content h3 {
+            color: #3498db;
+            margin-top: 0;
+        }
+
+        .modal-content input {
+            width: 100%;
+            padding: 10px;
+            border-radius: 6px;
+            border: 1px solid #34495e;
+            background: #0f2a44;
+            color: #ecf0f1;
+            font-size: 16px;
+        }
+
+        .modal-buttons {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            margin-top: 12px;
+        }
+
+        .modal-buttons button {
+            padding: 8px 12px;
+            border-radius: 6px;
+            border: none;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .cancel-btn {
+            background: #95a5a6;
+        }
+
+        .enter-btn {
+            background: #3b72e9;
+            color: white;
+        }
+
+        #msg {
+            color: #f39c12;
+            margin-top: 10px;
+            font-size: 14px;
+            display: none;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Painel Administrativo</h1>
+
+        <div class="login-box">
+            <input class="input" placeholder="Login" />
+            <input class="input" placeholder="Digite uma senha" />
+            <button class="btn" id="abrirModal">Entrar</button>
+        </div>
+    </div>
+
+    <img src="../static/sesi.png" alt="Logo SESI" class="logo" />
+
+    <!-- MODAL -->
+    <div id="loginModal">
+        <div class="modal-content">
+            <h3>🔐 Confirmar Senha</h3>
+            <input type="password" id="pwInput" placeholder="Digite a senha">
+            <div class="modal-buttons">
+                <button class="cancel-btn" id="cancelBtn">Cancelar</button>
+                <button class="enter-btn" id="submitBtn">Entrar</button>
+            </div>
+            <p id="msg"></p>
+        </div>
+    </div>
+
+    <script>
+        (function () {
+            const PASSWORD = "votumaker"; // ← altere para a senha desejada
+            const MAX_ATTEMPTS = 3;
+            let attempts = 0;
+
+            const abrirModal = document.getElementById("abrirModal");
+            const modal = document.getElementById("loginModal");
+            const cancelBtn = document.getElementById("cancelBtn");
+            const submitBtn = document.getElementById("submitBtn");
+            const pwInput = document.getElementById("pwInput");
+            const msg = document.getElementById("msg");
+
+            abrirModal.addEventListener("click", () => {
+                if (attempts >= MAX_ATTEMPTS) {
+                    alert("Acesso bloqueado por muitas tentativas.");
+                    return;
+                }
+                pwInput.value = "";
+                msg.style.display = "none";
+                modal.style.display = "flex";
+                pwInput.focus();
+            });
+
+            cancelBtn.addEventListener("click", () => {
+                modal.style.display = "none";
+            });
+
+            submitBtn.addEventListener("click", tryLogin);
+            pwInput.addEventListener("keydown", (e) => {
+                if (e.key === "Enter") tryLogin();
+            });
+
+            function tryLogin() {
+                const val = pwInput.value;
+                if (val === PASSWORD) {
+                    window.location.href = "/admin";
+                } else {
+                    attempts++;
+                    const remaining = MAX_ATTEMPTS - attempts;
+                    msg.style.display = "block";
+                    if (remaining > 0) {
+                        msg.textContent = "Senha incorreta. Tentativas restantes: " + remaining;
+                    } else {
+                        msg.textContent = "Acesso bloqueado por muitas tentativas.";
+                        abrirModal.disabled = true;
+                        abrirModal.style.opacity = "0.6";
+                        abrirModal.style.cursor = "not-allowed";
+                    }
+                }
+            }
+
+            // Fecha o modal clicando fora da caixa
+            modal.addEventListener("click", (e) => {
+                if (e.target === modal) modal.style.display = "none";
+            });
+        })();
+    </script>
+</body>
+
+</html>
