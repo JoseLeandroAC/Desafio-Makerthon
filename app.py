@@ -244,6 +244,15 @@ def distance_to_confidence(distance):
 def index():
     return render_template("index.html")
 
+# ROTA NOVA: Para a página de registro
+@app.route('/registro')
+def registro():
+    """
+    Carrega o template da página de registro.
+    OBS: O arquivo 'Registro.html' deve estar na pasta 'templates'.
+    """
+    return render_template("Registro.html")
+
 @app.route('/admin')
 def admin_panel():
     conn = get_db_connection()
